@@ -1,16 +1,18 @@
 package helpers
 
-import proto "github.com/golang/protobuf/proto"
+import (
+	proto "github.com/golang/protobuf/proto"
+	pgcol "github.com/willtrking/go-proto-collections/protocollections"
+)
 
 //Define interfaces that help us match generated messages
 
 type CollectionElem interface {
-	DefaultDetails() *CollectionDetails
+	DefaultDetails() *pgcol.CollectionDetails
 	DataProto() proto.Message
 	LoadData(data interface{})
 	//Force data to come back as a slice
 	DataSlice() []interface{}
-	//SetupDetails(*pb.CollectionDetails)
 }
 
 type CollectionMessage interface {

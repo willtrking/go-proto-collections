@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package protocollections;
+
+option go_package = "github.com/willtrking/go-proto-collections/protocollections";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+
+message CollectionDetails {
+  string parentKey = 1;
+  string collectionKey = 2;
+  bool listable = 3;
+  bool loaded = 4;
+  uint64 maxResults = 5;
+  string nextRPC = 6;
+  google.protobuf.Any nextBody = 7;
+  
+}
+
+extend google.protobuf.MessageOptions {
+	string parentKey = 22915125;
+	string collectionKey = 20912152;
+	uint64 maxResults = 25251521;
+	string nextRPC = 2391212;
+
+}

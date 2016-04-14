@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -12,6 +13,7 @@ import (
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
 	"github.com/willtrking/go-proto-collections/protoc-gen-collections-go/descriptor"
 	"github.com/willtrking/go-proto-collections/protoc-gen-collections-go/generator"
+	pcol "github.com/willtrking/go-proto-collections/protocollections"
 )
 
 var (
@@ -115,6 +117,53 @@ func main() {
 					}
 
 				}
+			}
+		}
+	}
+
+	//Time to look for our collection gaps
+	//Any message with a collectionGap option set to a non empty string is a gap
+
+	for _, file := range targets {
+		for _, msg := range file.Messages {
+			if msg.Options != nil {
+				//We've got options, but are they the right ones????!!!!!????
+				//WHO KNOWS?!???!????!??????!?!??!?!???
+
+				//Oh i guess WE know
+				collectionGap, err := proto.GetExtension(msg.Options, pcol.E_CollectionGap)
+				if err == nil && collectionGap != nil {
+					//Found a gap option
+
+					cGap := collectionGap.(*string)
+
+					if cGap == nil {
+						glog.Fatalf(fmt.Sprintf("Found likely collection gap %s, but missing collectionGap option", msg.GetName()))
+					}
+
+					cGapStr := strings.TrimSpace(*cGap)
+
+					if cGapStr == "" {
+						glog.Fatalf(fmt.Sprintf("Found likely collection gap %s, but collectionGap option is an empty string!", msg.GetName()))
+					}
+
+					//Ensure the key we found exists in this message
+					found := false
+					for _, field := range msg.Field {
+						if field.GetName() == cGapStr {
+							//Found it!
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						glog.Fatalf(fmt.Sprintf("Found likely collection gap %s, but collectionGap option doesn't exist in parent message!", msg.GetName()))
+					}
+
+					g.AddGap(file, msg, cGapStr)
+				}
+
 			}
 		}
 	}

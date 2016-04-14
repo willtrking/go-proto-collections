@@ -19,4 +19,11 @@ type CollectionMessage interface {
 	DefaultCollectionMap() map[string]CollectionElem
 	LoadCollection(collection string, data interface{}) error
 	CollectionDataSlice(collection string) []interface{}
+	CollectionParentKeyData(collection string) interface{}
+	CollectionKeyData(interface{}, string) interface{}
+	ProtoBelongsToCollection(interface{}, string) bool
+}
+
+type CollectionGap interface {
+	GapBridge() CollectionMessage
 }

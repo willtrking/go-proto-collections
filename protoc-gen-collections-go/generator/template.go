@@ -66,6 +66,50 @@ func (p *{{.ParentGoName}}) CollectionDataSlice(collection string) []interface{}
 	}
 
 }
+
+//Get the data for a collection from the parent, which is this protobuf
+func (p *{{.ParentGoName}}) CollectionParentKeyData(collection string) interface{} {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		return p.{{.ParentGoKey}}
+	{{ end }}
+	default:
+		return nil
+	}
+}
+
+//Get the data for a collection from an element that could be in the collection
+func (p *{{.ParentGoName}}) CollectionKeyData(pb interface{}, collection string) interface{} {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		if pb == nil {
+			return nil 
+		} else {
+			return pb.(*{{.CollectionDataTypeGoName}}).{{.CollectionGoKey}}
+		}
+	{{ end }}
+	default:
+		return nil
+	}
+}
+
+func (p *{{.ParentGoName}}) ProtoBelongsToCollection(pb interface{}, collection string) bool {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+
+		if c, ok := pb.(*{{.CollectionDataTypeGoName}}); ok {
+			return c.{{.CollectionGoKey}} == p.{{.ParentGoKey}}
+		} else {
+			return false
+		}
+	{{ end }}
+	default:
+		return false
+	}
+}
 `))
 
 var listableCollectionTemplate = template.Must(template.New("listableCollection").Parse(`func (*{{.CollectionGoType}}) DefaultDetails() *pgcol.CollectionDetails {
@@ -106,8 +150,16 @@ func (c *{{.CollectionGoType}}) LoadData(data interface{}) {
 }
 
 func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
-	conv, _, _ := helpers.EnsureSlice(c.{{.CollectionDataGoName}})
-	return conv
+	if c.Data != nil {
+		s := make([]interface{},len(c.Data))
+		for idx, d := range c.Data {
+			s[idx] = d
+		}
+		return s
+	} else {
+		var s []interface{}
+		return s
+	}
 }
 `))
 
@@ -145,7 +197,42 @@ func (c *{{.CollectionGoType}}) LoadData(data interface{}) {
 }
 
 func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
-	conv, _, _ := helpers.EnsureSlice(c.{{.CollectionDataGoName}})
-	return conv
+	if c.Data != nil {
+		s := make([]interface{},1)
+		s[0] = c.Data
+		return s
+	} else {
+		var s []interface{}
+		return s
+	}
+}
+`))
+
+var collectionGapTemplate = template.Must(template.New("collectonGap").Parse(`func (g *{{.GapGoName}}) GapBridge() helpers.CollectionMessage {
+	return g.{{.GapGoAttribute}}
+}
+
+func (g *{{.GapGoName}}) DefaultCollectionMap() map[string]helpers.CollectionElem {
+	return g.{{.GapGoAttribute}}.DefaultCollectionMap()
+}
+
+func (g *{{.GapGoName}}) LoadCollection(collection string, data interface{}) error {
+	return g.{{.GapGoAttribute}}.LoadCollection(collection, data)
+}
+
+func (g *{{.GapGoName}}) CollectionDataSlice(collection string) []interface{} {
+	return g.{{.GapGoAttribute}}.CollectionDataSlice(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionParentKeyData(collection string) interface{} {
+	return g.{{.GapGoAttribute}}.CollectionParentKeyData(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionKeyData(pb interface{}, collection string) interface{} {
+	return g.{{.GapGoAttribute}}.CollectionKeyData(pb, collection)
+}
+
+func (g *{{.GapGoName}}) ProtoBelongsToCollection(pb interface{}, collection string) bool {
+	return g.{{.GapGoAttribute}}.ProtoBelongsToCollection(pb, collection)
 }
 `))

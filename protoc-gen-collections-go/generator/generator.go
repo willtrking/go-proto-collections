@@ -30,6 +30,12 @@ type GeneratorFile struct {
 	Source         string
 	File           *descriptor.File
 	ParentMessages []*ParentMessage
+	CollectionGaps []*CollectionGap
+}
+
+type CollectionGap struct {
+	GapGoName      string
+	GapGoAttribute string
 }
 
 type ParentMessage struct {
@@ -49,7 +55,9 @@ type CollectionMessage struct {
 	CollectionDataGoName     string
 	CollectionDataTypeGoName string
 	ParentKey                string
+	ParentGoKey              string
 	CollectionKey            string
+	CollectionGoKey          string
 	MaxResults               uint64
 	NextRPC                  string
 	Listable                 bool
@@ -57,6 +65,26 @@ type CollectionMessage struct {
 
 type Generator struct {
 	Targets map[string]*GeneratorFile
+}
+
+func (g *Generator) AddGap(file *descriptor.File, gap *descriptor.Message, gapAttr string) {
+	fileName := file.GetName()
+	if _, ok := g.Targets[fileName]; !ok {
+		//Dont have it
+		g.Targets[fileName] = &GeneratorFile{
+			GoPackage: file.GoPkg.Name,
+			Source:    fileName,
+			File:      file,
+		}
+	}
+
+	gapMessage := &CollectionGap{
+		GapGoName:      upperFirst(gap.GetName()),
+		GapGoAttribute: upperFirst(gapAttr),
+	}
+
+	g.Targets[fileName].CollectionGaps = append(g.Targets[fileName].CollectionGaps, gapMessage)
+
 }
 
 func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message, parentAttr string, col *pdescriptor.DescriptorProto) {
@@ -152,6 +180,7 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 					}
 
 					collectionMessage.ParentKey = *pKey
+					collectionMessage.ParentGoKey = upperFirst(collectionMessage.ParentKey)
 
 					collectionKey, err := proto.GetExtension(colNested.Options, pcol.E_CollectionKey)
 					if err != nil || collectionKey == nil {
@@ -166,6 +195,7 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 					}
 
 					collectionMessage.CollectionKey = *cKey
+					collectionMessage.CollectionGoKey = upperFirst(collectionMessage.CollectionKey)
 
 					//If we're listable check for max results, otherwise always 1
 					if collectionMessage.Listable {
@@ -222,10 +252,16 @@ func (g *Generator) Generate() ([]*plugin.CodeGeneratorResponse_File, error) {
 	var files []*plugin.CodeGeneratorResponse_File
 
 	for _, target := range g.Targets {
+		var toWrite bytes.Buffer
+		wroteHeader := false
+		didWrite := false
 		if len(target.ParentMessages) > 0 {
-			var toWrite bytes.Buffer
-			fileHeaderTemplate.Execute(&toWrite, target)
-			toWrite.WriteRune('\n')
+
+			if !wroteHeader {
+				fileHeaderTemplate.Execute(&toWrite, target)
+				toWrite.WriteRune('\n')
+				wroteHeader = true
+			}
 
 			for _, targetParent := range target.ParentMessages {
 				parentMessageTemplate.Execute(&toWrite, targetParent)
@@ -241,6 +277,27 @@ func (g *Generator) Generate() ([]*plugin.CodeGeneratorResponse_File, error) {
 				}
 			}
 
+			didWrite = true
+
+		}
+
+		if len(target.CollectionGaps) > 0 {
+			if !wroteHeader {
+				fileHeaderTemplate.Execute(&toWrite, target)
+				toWrite.WriteRune('\n')
+				wroteHeader = true
+			}
+
+			for _, targetGap := range target.CollectionGaps {
+				collectionGapTemplate.Execute(&toWrite, targetGap)
+				toWrite.WriteRune('\n')
+			}
+
+			didWrite = true
+
+		}
+
+		if didWrite {
 			formatted, err := format.Source(toWrite.Bytes())
 
 			if err != nil {
@@ -257,8 +314,8 @@ func (g *Generator) Generate() ([]*plugin.CodeGeneratorResponse_File, error) {
 				Name:    proto.String(output),
 				Content: proto.String(string(formatted)),
 			})
-
 		}
+
 	}
 
 	return files, nil

@@ -37,8 +37,6 @@ type File struct {
 	GoPkg GoPackage
 	// Messages is the list of messages defined in this file.
 	Messages []*Message
-	// Enums is the list of enums defined in this file.
-	Enums []*Enum
 }
 
 // proto2 determines if the syntax of the file is proto2.
@@ -86,26 +84,6 @@ func (m *Message) GoType(currentPackage string) string {
 	return fmt.Sprintf("%s.%s", pkg, name)
 }
 
-// Enum describes a protocol buffer enum types
-type Enum struct {
-	// File is the file where the enum is defined
-	File *File
-	// Outers is a list of outer messages if this enum is a nested type.
-	Outers []string
-	*descriptor.EnumDescriptorProto
-}
-
-// FQEN returns a fully qualified enum name of this enum.
-func (e *Enum) FQEN() string {
-	components := []string{""}
-	if e.File.Package != nil {
-		components = append(components, e.File.GetPackage())
-	}
-	components = append(components, e.Outers...)
-	components = append(components, e.GetName())
-	return strings.Join(components, ".")
-}
-
 // Field wraps descriptor.FieldDescriptorProto for richer features.
 type Field struct {
 	// Message is the message type which this field belongs to.
@@ -114,51 +92,3 @@ type Field struct {
 	FieldMessage *Message
 	*descriptor.FieldDescriptorProto
 }
-
-var (
-	proto3ConvertFuncs = map[descriptor.FieldDescriptorProto_Type]string{
-		descriptor.FieldDescriptorProto_TYPE_DOUBLE:  "runtime.Float64",
-		descriptor.FieldDescriptorProto_TYPE_FLOAT:   "runtime.Float32",
-		descriptor.FieldDescriptorProto_TYPE_INT64:   "runtime.Int64",
-		descriptor.FieldDescriptorProto_TYPE_UINT64:  "runtime.Uint64",
-		descriptor.FieldDescriptorProto_TYPE_INT32:   "runtime.Int32",
-		descriptor.FieldDescriptorProto_TYPE_FIXED64: "runtime.Uint64",
-		descriptor.FieldDescriptorProto_TYPE_FIXED32: "runtime.Uint32",
-		descriptor.FieldDescriptorProto_TYPE_BOOL:    "runtime.Bool",
-		descriptor.FieldDescriptorProto_TYPE_STRING:  "runtime.String",
-		// FieldDescriptorProto_TYPE_GROUP
-		// FieldDescriptorProto_TYPE_MESSAGE
-		// FieldDescriptorProto_TYPE_BYTES
-		// TODO(yugui) Handle bytes
-		descriptor.FieldDescriptorProto_TYPE_UINT32: "runtime.Uint32",
-		// FieldDescriptorProto_TYPE_ENUM
-		// TODO(yugui) Handle Enum
-		descriptor.FieldDescriptorProto_TYPE_SFIXED32: "runtime.Int32",
-		descriptor.FieldDescriptorProto_TYPE_SFIXED64: "runtime.Int64",
-		descriptor.FieldDescriptorProto_TYPE_SINT32:   "runtime.Int32",
-		descriptor.FieldDescriptorProto_TYPE_SINT64:   "runtime.Int64",
-	}
-
-	proto2ConvertFuncs = map[descriptor.FieldDescriptorProto_Type]string{
-		descriptor.FieldDescriptorProto_TYPE_DOUBLE:  "runtime.Float64P",
-		descriptor.FieldDescriptorProto_TYPE_FLOAT:   "runtime.Float32P",
-		descriptor.FieldDescriptorProto_TYPE_INT64:   "runtime.Int64P",
-		descriptor.FieldDescriptorProto_TYPE_UINT64:  "runtime.Uint64P",
-		descriptor.FieldDescriptorProto_TYPE_INT32:   "runtime.Int32P",
-		descriptor.FieldDescriptorProto_TYPE_FIXED64: "runtime.Uint64P",
-		descriptor.FieldDescriptorProto_TYPE_FIXED32: "runtime.Uint32P",
-		descriptor.FieldDescriptorProto_TYPE_BOOL:    "runtime.BoolP",
-		descriptor.FieldDescriptorProto_TYPE_STRING:  "runtime.StringP",
-		// FieldDescriptorProto_TYPE_GROUP
-		// FieldDescriptorProto_TYPE_MESSAGE
-		// FieldDescriptorProto_TYPE_BYTES
-		// TODO(yugui) Handle bytes
-		descriptor.FieldDescriptorProto_TYPE_UINT32: "runtime.Uint32P",
-		// FieldDescriptorProto_TYPE_ENUM
-		// TODO(yugui) Handle Enum
-		descriptor.FieldDescriptorProto_TYPE_SFIXED32: "runtime.Int32P",
-		descriptor.FieldDescriptorProto_TYPE_SFIXED64: "runtime.Int64P",
-		descriptor.FieldDescriptorProto_TYPE_SINT32:   "runtime.Int32P",
-		descriptor.FieldDescriptorProto_TYPE_SINT64:   "runtime.Int64P",
-	}
-)

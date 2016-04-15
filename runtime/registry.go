@@ -25,8 +25,6 @@ type CollectionLoader interface {
 	Loaded() bool
 	//We want to be able to wait for a loader to have called load
 	Wait()
-	//Return a new version of the itself, ready to be used
-	New() CollectionLoader
 	//Force the loaded data to be returned as a list of interface{}
 	//Returns nil if empty or not loaded
 	DataSlice() []interface{}
@@ -37,14 +35,14 @@ type CollectionLoader interface {
 func NewRegistry() *CollectionRegistry {
 
 	return &CollectionRegistry{
-		Loaders: make(map[RegistryKey]*CollectionLoader),
+		Loaders: make(map[RegistryKey]func(string) (CollectionLoader, error)),
 	}
 }
 
 //Allows us to register a loader to the relevant CollectionDetail struct
 type CollectionRegistry struct {
 	mu      sync.Mutex //Guard
-	Loaders map[RegistryKey]*CollectionLoader
+	Loaders map[RegistryKey]func(string) (CollectionLoader, error)
 }
 
 type RegistryKey struct {
@@ -52,8 +50,8 @@ type RegistryKey struct {
 	p string
 }
 
-//Registers a loader
-func (r *CollectionRegistry) RegisterLoader(m pcolh.CollectionElem, f CollectionLoader) {
+//Registers a function to get a new loader with a data key
+func (r *CollectionRegistry) RegisterLoader(m pcolh.CollectionElem, f func(string) (CollectionLoader, error)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -68,13 +66,13 @@ func (r *CollectionRegistry) RegisterLoader(m pcolh.CollectionElem, f Collection
 		return
 	}
 
-	r.Loaders[k] = &f
+	r.Loaders[k] = f
 
 }
 
-//Returns a new loader of the zero value concrete type behind our CollectionLoader
+//Returns a function that will get a zero'd loader with the specified data key
 //Each loader is stateful, so this is important
-func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (CollectionLoader, error) {
+func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (func(string) (CollectionLoader, error), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -88,6 +86,6 @@ func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (CollectionLoader, e
 		return nil, errors.New(fmt.Sprintf("No loader for %+v", k))
 	}
 
-	return (*r.Loaders[k]).New(), nil
+	return r.Loaders[k], nil
 
 }

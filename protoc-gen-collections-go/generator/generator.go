@@ -25,6 +25,30 @@ func upperFirst(s string) string {
 	return string(unicode.ToUpper(r)) + s[n:]
 }
 
+func lowerFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToLower(r)) + s[n:]
+}
+
+func collectionDataTypeGoName(dataField *pdescriptor.FieldDescriptorProto, file *descriptor.File) string {
+	dataType := strings.Replace(dataField.GetTypeName(), "."+file.GetPackage()+".", "", 1)
+	return upperFirst(dataType)
+
+}
+
+func MsgAttr(attr string, msg *descriptor.Message) *pdescriptor.FieldDescriptorProto {
+	for _, field := range msg.Field {
+		if field.GetName() == attr {
+			//Found it!
+			return field
+		}
+	}
+	return nil
+}
+
 type GeneratorFile struct {
 	GoPackage      string
 	Source         string
@@ -63,8 +87,83 @@ type CollectionMessage struct {
 	Listable                 bool
 }
 
+type Loader struct {
+	GoPackage                string
+	CollectionDataTypeGoName string
+	CLTypes                  []*LoaderType
+	CLRegisterTypes          []*LoaderType
+	foundCLTypes             map[string]bool
+}
+
+type LoaderType struct {
+	CollectionDataTypeGoName string
+	CollectionGoType         string
+	CollectionKey            string
+	CollectionGoKey          string
+	CollectionKeyGoType      string
+}
+
 type Generator struct {
-	Targets map[string]*GeneratorFile
+	Targets       map[string]*GeneratorFile
+	registry      *descriptor.Registry
+	targetLoaders map[string]*Loader
+}
+
+func (g *Generator) addLoader(col *CollectionMessage, collectionKeyAttr *pdescriptor.FieldDescriptorProto, collectionKeyMessage *descriptor.Message) {
+
+	if _, ok := g.targetLoaders[col.CollectionDataTypeGoName]; !ok {
+		//Dont have it
+		g.targetLoaders[col.CollectionDataTypeGoName] = &Loader{
+			GoPackage:                collectionKeyMessage.File.GoPkg.Name,
+			CollectionDataTypeGoName: col.CollectionDataTypeGoName,
+			foundCLTypes:             make(map[string]bool),
+		}
+	}
+
+	//Haven't added stuff for the CollectionGoKey of this particular loader yet
+
+	cKeyGoType := descriptor.GetGoBaseType(collectionKeyAttr.Type, collectionKeyMessage.File)
+	if cKeyGoType == "" {
+		if collectionKeyAttr.Type != nil {
+			if *collectionKeyAttr.Type == pdescriptor.FieldDescriptorProto_TYPE_MESSAGE {
+				cKeyMessage, _ := g.registry.LookupMsg("", collectionKeyAttr.GetTypeName())
+
+				if cKeyMessage == nil {
+					glog.Fatalf(fmt.Sprintf("Can't locate concrete go type for collectionKey %s, unknown message type %s", col.CollectionKey, collectionKeyAttr.GetTypeName()))
+				}
+
+				cKeyGoType = collectionDataTypeGoName(collectionKeyAttr, collectionKeyMessage.File)
+
+				if cKeyGoType == "" {
+					glog.Fatalf(fmt.Sprintf("Can't locate concrete go type for collectionKey %s, must be a message type or a concrete Go type", col.CollectionKey))
+				}
+
+			} else {
+				glog.Fatalf(fmt.Sprintf("Can't locate concrete go type for collectionKey %s, must be a message type or a concrete Go type", col.CollectionKey))
+			}
+		} else {
+			glog.Fatalf(fmt.Sprintf("Can't locate concrete go type for collectionKey %s, must be a message type or a concrete Go type", col.CollectionKey))
+		}
+
+	}
+
+	l := &LoaderType{
+		CollectionDataTypeGoName: col.CollectionDataTypeGoName,
+		CollectionGoType:         col.CollectionGoType,
+		CollectionKey:            col.CollectionKey,
+		CollectionGoKey:          col.CollectionGoKey,
+		CollectionKeyGoType:      cKeyGoType,
+	}
+
+	g.targetLoaders[col.CollectionDataTypeGoName].CLRegisterTypes = append(g.targetLoaders[col.CollectionDataTypeGoName].CLRegisterTypes, l)
+
+	dedupKey := col.CollectionDataTypeGoName + " " + col.CollectionGoKey
+
+	if _, ok := g.targetLoaders[col.CollectionDataTypeGoName].foundCLTypes[dedupKey]; !ok {
+		g.targetLoaders[col.CollectionDataTypeGoName].CLTypes = append(g.targetLoaders[col.CollectionDataTypeGoName].CLTypes, l)
+		g.targetLoaders[col.CollectionDataTypeGoName].foundCLTypes[dedupKey] = true
+	}
+
 }
 
 func (g *Generator) AddGap(file *descriptor.File, gap *descriptor.Message, gapAttr string) {
@@ -154,7 +253,12 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 				//Only used once
 				if usedOnce && colNestedField != nil {
 
-					dataType := strings.Replace(dataField.GetTypeName(), "."+file.GetPackage()+".", "", 1)
+					dataMessage, _ := g.registry.LookupMsg("", dataField.GetTypeName())
+
+					if dataMessage == nil {
+						glog.Fatalf(fmt.Sprintf("Collection data field in collection %s in parent %s must be a known message, got %s of type %#v",
+							colNested.GetName(), parent.GetName(), dataField.GetTypeName(), dataField.Type))
+					}
 
 					collectionMessage := &CollectionMessage{
 						ParentGoCollectionAttr:   upperFirst(parentAttr),
@@ -163,7 +267,7 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 						CollectionGoType:         upperFirst(parent.GetName()) + "_" + upperFirst(col.GetName()) + "_" + upperFirst(colNested.GetName()),
 						CollectionDetailsGoName:  upperFirst(collectionField.GetName()),
 						CollectionDataGoName:     upperFirst(dataField.GetName()),
-						CollectionDataTypeGoName: upperFirst(dataType),
+						CollectionDataTypeGoName: collectionDataTypeGoName(dataField, file),
 						Listable:                 dataField.GetLabel() == pdescriptor.FieldDescriptorProto_LABEL_REPEATED,
 					}
 
@@ -179,8 +283,12 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 						glog.Fatalf(fmt.Sprintf("Found likely collection %s, but missing parentKey option", collectionMessage.CollectionGoType))
 					}
 
-					collectionMessage.ParentKey = *pKey
+					collectionMessage.ParentKey = strings.TrimSpace(*pKey)
 					collectionMessage.ParentGoKey = upperFirst(collectionMessage.ParentKey)
+
+					if MsgAttr(collectionMessage.ParentKey, parent) == nil {
+						glog.Fatalf(fmt.Sprintf("Found likely collection %s, but parentKey option doesn't exist in parent %s!", collectionMessage.CollectionGoType, parent.GetName()))
+					}
 
 					collectionKey, err := proto.GetExtension(colNested.Options, pcol.E_CollectionKey)
 					if err != nil || collectionKey == nil {
@@ -196,6 +304,13 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 
 					collectionMessage.CollectionKey = *cKey
 					collectionMessage.CollectionGoKey = upperFirst(collectionMessage.CollectionKey)
+
+					collectionKeyAttr := MsgAttr(collectionMessage.CollectionKey, dataMessage)
+					if collectionKeyAttr == nil {
+						glog.Fatalf(fmt.Sprintf("Found likely collection %s, but collectionKey option doesn't exist in data field type %s!", collectionMessage.CollectionGoType, dataField.GetTypeName()))
+					}
+
+					//dataMessage
 
 					//If we're listable check for max results, otherwise always 1
 					if collectionMessage.Listable {
@@ -234,6 +349,7 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 						collectionMessage.NextRPC = ""
 					}
 
+					g.addLoader(collectionMessage, collectionKeyAttr, dataMessage)
 					parentMessage.Collections = append(parentMessage.Collections, collectionMessage)
 				}
 
@@ -318,11 +434,37 @@ func (g *Generator) Generate() ([]*plugin.CodeGeneratorResponse_File, error) {
 
 	}
 
+	for loaderName, loader := range g.targetLoaders {
+
+		if len(loader.CLTypes) > 0 {
+
+			var toWrite bytes.Buffer
+
+			collectionLoaderTemplate.Execute(&toWrite, loader)
+			formatted, err := format.Source(toWrite.Bytes())
+
+			if err != nil {
+				glog.Errorf("%v", err)
+				return nil, err
+			}
+
+			output := fmt.Sprintf("%s.coloader.go", lowerFirst(loaderName))
+
+			files = append(files, &plugin.CodeGeneratorResponse_File{
+				Name:    proto.String(output),
+				Content: proto.String(string(formatted)),
+			})
+
+		}
+	}
+
 	return files, nil
 }
 
-func NewGenerator() *Generator {
+func NewGenerator(r *descriptor.Registry) *Generator {
 	return &Generator{
-		Targets: make(map[string]*GeneratorFile),
+		Targets:       make(map[string]*GeneratorFile),
+		targetLoaders: make(map[string]*Loader),
+		registry:      r,
 	}
 }

@@ -84,7 +84,7 @@ func main() {
 		targets = append(targets, f)
 	}
 
-	g := generator.NewGenerator()
+	g := generator.NewGenerator(reg)
 	//Look for our format, as follows
 	// - Messages named Collections
 	// - Nested (defined) inside of 1 message

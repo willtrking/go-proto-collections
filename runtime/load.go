@@ -332,16 +332,17 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 				//We haven't set it up
 
 				//Grab the loader from our registry, if we have it
-				loader, fErr := r.Loader(collectionElem)
+				loaderFunc, fErr := r.Loader(collectionElem)
 				if fErr != nil {
 
 					return errors.New(fmt.Sprintf("Loader for %s not registered", currentPath.String()))
 				}
 
 				details := collectionElem.DefaultDetails()
-				kErr := loader.SetDataKey(details.CollectionKey)
 
-				if kErr != nil {
+				loader, lErr := loaderFunc(details.CollectionKey)
+
+				if lErr != nil {
 					return errors.New(fmt.Sprintf("Loader for %s can't load data with key %s", currentPath.String(), details.CollectionKey))
 				}
 

@@ -92,3 +92,57 @@ type Field struct {
 	FieldMessage *Message
 	*descriptor.FieldDescriptorProto
 }
+
+func GetGoBaseType(t *descriptor.FieldDescriptorProto_Type, f *File) string {
+	if t == nil {
+		return ""
+	}
+
+	if f.proto2() {
+		if st, ok := goProto2BaseType[*t]; ok {
+			return st
+		}
+	} else {
+		if st, ok := goProto3BaseType[*t]; ok {
+			return st
+		}
+	}
+
+	return ""
+}
+
+var goProto3BaseType = map[descriptor.FieldDescriptorProto_Type]string{
+	descriptor.FieldDescriptorProto_TYPE_DOUBLE:   "float64",
+	descriptor.FieldDescriptorProto_TYPE_FLOAT:    "float32",
+	descriptor.FieldDescriptorProto_TYPE_INT64:    "int64",
+	descriptor.FieldDescriptorProto_TYPE_UINT64:   "uint64",
+	descriptor.FieldDescriptorProto_TYPE_INT32:    "int32",
+	descriptor.FieldDescriptorProto_TYPE_UINT32:   "uint32",
+	descriptor.FieldDescriptorProto_TYPE_FIXED64:  "uint64",
+	descriptor.FieldDescriptorProto_TYPE_FIXED32:  "uint32",
+	descriptor.FieldDescriptorProto_TYPE_BOOL:     "bool",
+	descriptor.FieldDescriptorProto_TYPE_STRING:   "string",
+	descriptor.FieldDescriptorProto_TYPE_BYTES:    "[]byte",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED32: "int32",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED64: "int64",
+	descriptor.FieldDescriptorProto_TYPE_SINT32:   "int32",
+	descriptor.FieldDescriptorProto_TYPE_SINT64:   "int64",
+}
+
+var goProto2BaseType = map[descriptor.FieldDescriptorProto_Type]string{
+	descriptor.FieldDescriptorProto_TYPE_DOUBLE:   "*float64",
+	descriptor.FieldDescriptorProto_TYPE_FLOAT:    "*float32",
+	descriptor.FieldDescriptorProto_TYPE_INT64:    "*int64",
+	descriptor.FieldDescriptorProto_TYPE_UINT64:   "*uint64",
+	descriptor.FieldDescriptorProto_TYPE_INT32:    "*int32",
+	descriptor.FieldDescriptorProto_TYPE_UINT32:   "*uint32",
+	descriptor.FieldDescriptorProto_TYPE_FIXED64:  "*uint64",
+	descriptor.FieldDescriptorProto_TYPE_FIXED32:  "*uint32",
+	descriptor.FieldDescriptorProto_TYPE_BOOL:     "*bool",
+	descriptor.FieldDescriptorProto_TYPE_STRING:   "*string",
+	descriptor.FieldDescriptorProto_TYPE_BYTES:    "[]byte",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED32: "*int32",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED64: "*int64",
+	descriptor.FieldDescriptorProto_TYPE_SINT32:   "*int32",
+	descriptor.FieldDescriptorProto_TYPE_SINT64:   "*int64",
+}

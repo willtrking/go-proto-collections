@@ -28,7 +28,7 @@ var parentMessageTemplate = template.Must(template.New("parentMessage").Parse(`f
 	return m
 }
 
-func (p *{{.ParentGoName}}) LoadCollection(collection string, data interface{}) error {
+func (p *{{.ParentGoName}}) LoadCollection(collection string, data []interface{}) error {
 
 	if p.{{.ParentGoCollectionAttr}} == nil {
 		p.{{.ParentGoCollectionAttr}} = &{{.ParentCollectionGoType}}{}
@@ -128,17 +128,26 @@ func (*{{.CollectionGoType}}) DataProto() proto.Message {
 	return &{{.CollectionDataTypeGoName}}{}
 }
 
-func (c *{{.CollectionGoType}}) LoadData(data interface{}) {
+func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 
 	c.{{.CollectionDetailsGoName}} = c.DefaultDetails()
 
-	if data != nil {
-		conv, len, _ := helpers.EnsureSlice(data)
+	dL := len(data)
 
-		c.{{.CollectionDataGoName}} = make([]*{{.CollectionDataTypeGoName}}, len)
+	if dL > 0 {
 
-		for i, v := range conv {
-			c.{{.CollectionDataGoName}}[i] = v.(*{{.CollectionDataTypeGoName}})
+		c.{{.CollectionDataGoName}} = make([]*{{.CollectionDataTypeGoName}}, dL)
+
+		for i, v := range data {
+			if v != nil {
+				c.{{.CollectionDataGoName}}[i] = v.(*{{.CollectionDataTypeGoName}})
+			}
+		}
+
+		if len(c.{{.CollectionDataGoName}}) != dL {
+			d := make([]*{{.CollectionDataTypeGoName}}, len(c.{{.CollectionDataGoName}}))
+			copy(d, c.{{.CollectionDataGoName}})
+			c.{{.CollectionDataGoName}} = d
 		}
 
 		c.{{.CollectionDetailsGoName}}.Loaded = true
@@ -179,15 +188,25 @@ func (*{{.CollectionGoType}}) DataProto() proto.Message {
 	return &{{.CollectionDataTypeGoName}}{}
 }
 
-func (c *{{.CollectionGoType}}) LoadData(data interface{}) {
+func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 
 	c.{{.CollectionDetailsGoName}} = c.DefaultDetails()
+	c.{{.CollectionDetailsGoName}}.Loaded = false
 
-	r, _ := helpers.EnsureNotSlice(data)
+	if len(data) > 0 {
+		for _, v := range data {
+			if v != nil {
+				c.{{.CollectionDataGoName}} = v.(*{{.CollectionDataTypeGoName}})
+				c.{{.CollectionDetailsGoName}}.Loaded = true
+				break
+			}
+		}
 
-	if r != nil {
-		c.{{.CollectionDataGoName}} = r.(*{{.CollectionDataTypeGoName}})
-		c.{{.CollectionDetailsGoName}}.Loaded = true
+		if c.{{.CollectionDetailsGoName}}.Loaded != true {
+			c.{{.CollectionDataGoName}} = &{{.CollectionDataTypeGoName}}{}
+			c.{{.CollectionDetailsGoName}}.Loaded = true
+		}
+		
 
 	} else {
 		c.{{.CollectionDataGoName}} = &{{.CollectionDataTypeGoName}}{}
@@ -216,7 +235,7 @@ func (g *{{.GapGoName}}) DefaultCollectionMap() map[string]helpers.CollectionEle
 	return g.{{.GapGoAttribute}}.DefaultCollectionMap()
 }
 
-func (g *{{.GapGoName}}) LoadCollection(collection string, data interface{}) error {
+func (g *{{.GapGoName}}) LoadCollection(collection string, data []interface{}) error {
 	return g.{{.GapGoAttribute}}.LoadCollection(collection, data)
 }
 

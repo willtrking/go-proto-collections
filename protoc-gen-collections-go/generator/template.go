@@ -144,7 +144,7 @@ func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 			}
 		}
 
-		cL := len(len(c.{{.CollectionDataGoName}}))
+		cL := len(c.{{.CollectionDataGoName}})
 
 		if cL > 0 {
 			if cL != dL {

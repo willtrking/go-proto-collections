@@ -144,10 +144,17 @@ func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 			}
 		}
 
-		if len(c.{{.CollectionDataGoName}}) != dL {
-			d := make([]*{{.CollectionDataTypeGoName}}, len(c.{{.CollectionDataGoName}}))
-			copy(d, c.{{.CollectionDataGoName}})
-			c.{{.CollectionDataGoName}} = d
+		cL := len(len(c.{{.CollectionDataGoName}}))
+
+		if cL > 0 {
+			if cL != dL {
+				d := make([]*{{.CollectionDataTypeGoName}}, cL)
+				copy(d, c.{{.CollectionDataGoName}})
+				c.{{.CollectionDataGoName}} = nil
+				c.{{.CollectionDataGoName}} = d
+			}
+		} else {
+			c.{{.CollectionDataGoName}} = nil
 		}
 
 		c.{{.CollectionDetailsGoName}}.Loaded = true

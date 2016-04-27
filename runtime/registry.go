@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"golang.org/x/net/context"
+
 	"github.com/golang/protobuf/proto"
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
 	pgcol "github.com/willtrking/go-proto-collections/protocollections"
@@ -27,15 +29,48 @@ type CollectionLoader interface {
 	Wait()
 	//Force the loaded data to be returned as a list of interface{}
 	//Returns nil if empty or not loaded
-	DataSlice() []interface{}
+	InterfaceSlice() []interface{}
 	//Register this loader in the provided registry for it's relevant collections
 	//Register(CollectionRegistry)
+}
+
+type CollectionWriter interface {
+	//Should use sync.Once internally to prevent double reads
+	Read([]proto.Message, proto.Message)
+	//Wait for read to finish
+	WaitRead()
+	//Validate the basic data, ideally with no IO interaction
+	Validate(context.Context) (context.Context, []WriterError)
+	//Wait for above validation to complete
+	WaitValidate()
+	ValidateUnlockWait()
+	ValidateHadErrors() bool
+	SetValidateHadErrors(bool)
+	//Validation with IO happens within this function
+	CheckPrecondition(context.Context) (context.Context, []WriterError)
+	//Wait for precondition check
+	WaitPrecondition()
+	PreconditionUnlockWait()
+	PreconditionHadErrors() bool
+	SetPreconditionHadErrors(bool)
+	//Write our data somewhere, can use IO
+	Write(context.Context) ([]interface{}, []WriterError)
+	//Wait for write
+	WaitWrite()
+	WriteUnlockWait()
+	WriteHadErrors() bool
+	SetWriteHadErrors(bool)
+	Reading() bool
+	DidRead() bool
+	InterfaceSlice() []interface{}
+	ProtoSlice() []proto.Message
 }
 
 func NewRegistry() *CollectionRegistry {
 
 	return &CollectionRegistry{
 		Loaders: make(map[RegistryKey]func(string) (CollectionLoader, error)),
+		Writers: make(map[RegistryKey]func() (CollectionWriter, error)),
 	}
 }
 
@@ -43,6 +78,7 @@ func NewRegistry() *CollectionRegistry {
 type CollectionRegistry struct {
 	mu      sync.Mutex //Guard
 	Loaders map[RegistryKey]func(string) (CollectionLoader, error)
+	Writers map[RegistryKey]func() (CollectionWriter, error)
 }
 
 type RegistryKey struct {
@@ -62,11 +98,31 @@ func (r *CollectionRegistry) RegisterLoader(m pcolh.CollectionElem, f func(strin
 	}
 
 	if _, ok := r.Loaders[k]; ok {
-		grpclog.Println("Ignored duplicate collection registration of ", k)
+		grpclog.Println("Ignored duplicate collection loader registration of ", k)
 		return
 	}
 
 	r.Loaders[k] = f
+
+}
+
+//Registers a function to get a new writer with a data key
+func (r *CollectionRegistry) RegisterWriter(m pcolh.CollectionElem, f func() (CollectionWriter, error)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	d := *m.DefaultDetails()
+	k := RegistryKey{
+		d: d,
+		p: proto.MessageName(m.DataProto()),
+	}
+
+	if _, ok := r.Writers[k]; ok {
+		grpclog.Println("Ignored duplicate collection writer registration of ", k)
+		return
+	}
+
+	r.Writers[k] = f
 
 }
 
@@ -87,5 +143,25 @@ func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (func(string) (Colle
 	}
 
 	return r.Loaders[k], nil
+
+}
+
+//Returns a function that will get a zero'd writer with the specified data key
+//Each writer is stateful, so this is important
+func (r *CollectionRegistry) Writer(m pcolh.CollectionElem) (func() (CollectionWriter, error), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	d := *m.DefaultDetails()
+	k := RegistryKey{
+		d: d,
+		p: proto.MessageName(m.DataProto()),
+	}
+
+	if _, ok := r.Writers[k]; !ok {
+		return nil, errors.New(fmt.Sprintf("No writer for %+v", k))
+	}
+
+	return r.Writers[k], nil
 
 }

@@ -28,6 +28,14 @@ var parentMessageTemplate = template.Must(template.New("parentMessage").Parse(`f
 	return m
 }
 
+func (p *{{.ParentGoName}}) CollectionKeys() []string {
+	return []string{
+		{{ range .Collections }}
+		"{{.CollectionName}}",
+		{{ end }}
+	}
+}
+
 func (p *{{.ParentGoName}}) LoadCollection(collection string, data []interface{}) error {
 
 	if p.{{.ParentGoCollectionAttr}} == nil {
@@ -47,7 +55,7 @@ func (p *{{.ParentGoName}}) LoadCollection(collection string, data []interface{}
 
 }
 
-func (p *{{.ParentGoName}}) CollectionDataSlice(collection string) []interface{} {
+func (p *{{.ParentGoName}}) CollectionInterfaceSlice(collection string) []interface{} {
 	if p.{{.ParentGoCollectionAttr}} == nil {
 		return nil
 	}
@@ -58,13 +66,83 @@ func (p *{{.ParentGoName}}) CollectionDataSlice(collection string) []interface{}
 		if p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} == nil {
 			return nil
 		} else {
-			return p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.DataSlice()
+			return p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.InterfaceSlice()
 		}
 	{{ end }}
 	default:
 		return nil
 	}
 
+}
+
+func (p *{{.ParentGoName}}) CollectionProtoSlice(collection string) []proto.Message {
+	if p.{{.ParentGoCollectionAttr}} == nil {
+		return nil
+	}
+
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		if p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} == nil {
+			return nil
+		} else {
+			return p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.ProtoSlice()
+		}
+	{{ end }}
+	default:
+		return nil
+	}
+
+}
+
+func (p *{{.ParentGoName}}) CollectionElem(collection string) helpers.CollectionElem {
+	if p.{{.ParentGoCollectionAttr}} == nil {
+		return nil
+	}
+
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		if p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} == nil {
+			return nil
+		} else {
+			return p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}
+		}
+	{{ end }}
+	default:
+		return nil
+	}
+
+}
+
+func (p *{{.ParentGoName}}) SetCollectionParentKeyData(d interface{}, collection string) {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		p.{{.ParentGoKey}} = d.({{.ParentKeyGoType}})
+	{{ end }}
+	}
+}
+
+func (p *{{.ParentGoName}}) SetCollectionKeyData(pb interface{}, d interface{}, collection string) {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		pb.(*{{.CollectionDataTypeGoName}}).{{.CollectionGoKey}} = d.({{.CollectionKeyGoType}})
+	{{ end }}
+	}
+}
+
+func (p *{{.ParentGoName}}) SetCollectionKeyDataFromParent(pb interface{}, collection string) string {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		pb.(*{{.CollectionDataTypeGoName}}).{{.CollectionGoKey}} = p.{{.ParentGoKey}}
+		return "{{.CollectionGoKey}}"
+	{{ end }}
+	}
+	
+	return ""
 }
 
 //Get the data for a collection from the parent, which is this protobuf
@@ -79,7 +157,33 @@ func (p *{{.ParentGoName}}) CollectionParentKeyData(collection string) interface
 	}
 }
 
+//Check if key belonging to the the parent (this protobuf) is default
+func (p *{{.ParentGoName}}) CollectionParentKeyIsDefault(collection string) bool {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		return p.{{.ParentGoKey}} == {{.ParentKeyGoDefault}}
+	{{ end }}
+	default:
+		return false
+	}
+}
+
+//Check if the key belonging to an element that could be in the collection is default
+//Will panic if pb is not the proper type, OR pb is nil, as it should
+func (p *{{.ParentGoName}}) CollectionKeyIsDefault(pb interface{}, collection string) bool {
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		return pb.(*{{.CollectionDataTypeGoName}}).{{.CollectionGoKey}} == {{.CollectionKeyGoDefault}}
+	{{ end }}
+	default:
+		return false
+	}
+}
+
 //Get the data for a collection from an element that could be in the collection
+//Will panic if pb is not the proper type, as it should
 func (p *{{.ParentGoName}}) CollectionKeyData(pb interface{}, collection string) interface{} {
 	switch collection {
 	{{ range .Collections }}
@@ -165,7 +269,7 @@ func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 
 }
 
-func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
+func (c *{{.CollectionGoType}}) InterfaceSlice() []interface{} {
 	if c.Data != nil {
 		s := make([]interface{},len(c.Data))
 		for idx, d := range c.Data {
@@ -173,8 +277,19 @@ func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
 		}
 		return s
 	} else {
-		var s []interface{}
+		return []interface{}{}
+	}
+}
+
+func (c *{{.CollectionGoType}}) ProtoSlice() []proto.Message {
+	if c.Data != nil {
+		s := make([]proto.Message,len(c.Data))
+		for idx, d := range c.Data {
+			s[idx] = d
+		}
 		return s
+	} else {
+		return []proto.Message{}
 	}
 }
 `))
@@ -222,7 +337,7 @@ func (c *{{.CollectionGoType}}) LoadData(data []interface{}) {
 
 }
 
-func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
+func (c *{{.CollectionGoType}}) InterfaceSlice() []interface{} {
 	if c.Data != nil {
 		s := make([]interface{},1)
 		s[0] = c.Data
@@ -231,6 +346,60 @@ func (c *{{.CollectionGoType}}) DataSlice() []interface{} {
 		var s []interface{}
 		return s
 	}
+}
+
+func (c *{{.CollectionGoType}}) ProtoSlice() []proto.Message {
+	if c.Data != nil {
+		s := make([]proto.Message,1)
+		s[0] = c.Data
+		return s
+	} else {
+		var s []proto.Message
+		return s
+	}
+}
+`))
+
+var listableCollectionMessageSliceImplementingTemplate = template.Must(template.New("collectionMessageSliceImplementingTemplate").Parse(`func (c *{{.CollectionGoType}}) CollectionMessageSlice() []helpers.CollectionMessage {
+	if c.Data != nil {
+		s := make([]helpers.CollectionMessage,len(c.Data))
+		for idx, d := range c.Data {
+			s[idx] = d
+		}
+		return s
+	}
+
+	return nil
+	
+}
+
+func (c *{{.CollectionGoType}}) DataIsCollectionMessage() bool {
+	return true
+}
+`))
+
+var collectionMessageSliceImplementingTemplate = template.Must(template.New("collectionMessageSliceImplementingTemplate").Parse(`func (c *{{.CollectionGoType}}) CollectionMessageSlice() []helpers.CollectionMessage {
+	if c.Data != nil {
+		s := make([]helpers.CollectionMessage,1)
+		s[0] = c.Data
+		return s
+	}
+
+	return nil
+	
+}
+
+func (c *{{.CollectionGoType}}) DataIsCollectionMessage() bool {
+	return true
+}
+`))
+
+var collectionMessageSliceNotImplementingTemplate = template.Must(template.New("collectionMessageSliceNotImplementingTemplate").Parse(`func (c *{{.CollectionGoType}}) CollectionMessageSlice() []helpers.CollectionMessage {
+	return nil
+}
+
+func (c *{{.CollectionGoType}}) DataIsCollectionMessage() bool {
+	return false
 }
 `))
 
@@ -242,16 +411,47 @@ func (g *{{.GapGoName}}) DefaultCollectionMap() map[string]helpers.CollectionEle
 	return g.{{.GapGoAttribute}}.DefaultCollectionMap()
 }
 
+func (g *{{.GapGoName}}) CollectionKeys() []string {
+	return g.{{.GapGoAttribute}}.CollectionKeys()
+}
+
 func (g *{{.GapGoName}}) LoadCollection(collection string, data []interface{}) error {
 	return g.{{.GapGoAttribute}}.LoadCollection(collection, data)
 }
 
-func (g *{{.GapGoName}}) CollectionDataSlice(collection string) []interface{} {
-	return g.{{.GapGoAttribute}}.CollectionDataSlice(collection)
+func (g *{{.GapGoName}}) CollectionElem(collection string) helpers.CollectionElem{
+	return g.{{.GapGoAttribute}}.CollectionElem(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionInterfaceSlice(collection string) []interface{} {
+	return g.{{.GapGoAttribute}}.CollectionInterfaceSlice(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionProtoSlice(collection string) []proto.Message {
+	return g.{{.GapGoAttribute}}.CollectionProtoSlice(collection)
+}
+
+func (g *{{.GapGoName}}) SetCollectionParentKeyData(d interface{}, collection string) {
+	g.{{.GapGoAttribute}}.SetCollectionParentKeyData(d, collection)
+}
+
+func (g *{{.GapGoName}}) SetCollectionKeyData(pb interface{}, d interface{}, collection string) {
+	g.{{.GapGoAttribute}}.SetCollectionKeyData(pb, d, collection)
+}
+func (g *{{.GapGoName}}) SetCollectionKeyDataFromParent(pb interface{}, collection string) string {
+	return g.{{.GapGoAttribute}}.SetCollectionKeyDataFromParent(pb, collection)
 }
 
 func (g *{{.GapGoName}}) CollectionParentKeyData(collection string) interface{} {
 	return g.{{.GapGoAttribute}}.CollectionParentKeyData(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionParentKeyIsDefault(collection string) bool {
+	return g.{{.GapGoAttribute}}.CollectionParentKeyIsDefault(collection)
+}
+
+func (g *{{.GapGoName}}) CollectionKeyIsDefault(pb interface{}, collection string) bool {
+	return g.{{.GapGoAttribute}}.CollectionKeyIsDefault(pb, collection)
 }
 
 func (g *{{.GapGoName}}) CollectionKeyData(pb interface{}, collection string) interface{} {
@@ -336,7 +536,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) SetDataKey(key string) error {
 	return nil
 }
 
-func (c *{{.CollectionDataTypeGoName}}_Loader) DataSlice() []interface{} {
+func (c *{{.CollectionDataTypeGoName}}_Loader) InterfaceSlice() []interface{} {
 
 	dL := len(c.Data)
 
@@ -359,7 +559,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) DataSlice() []interface{} {
 
 func (c *{{.CollectionDataTypeGoName}}_Loader) Load(from []interface{}) {
 	//Need to acquire a lock here so we wait until the first call is done
-	//Provides safety for DataSlice()
+	//Provides safety for InterfaceSlice()
 	c.loadLock.Lock()
 	defer c.loadLock.Unlock()
 
@@ -421,4 +621,302 @@ func New{{.CollectionDataTypeGoName}}_Loader(l {{.CollectionDataTypeGoName}}Load
 	}
 }
 
+`))
+
+var collectionWriterTemplate = template.Must(template.New("collectionWriterTemplate").Parse(`// Code generated by protoc-gen-collections-go
+// DO NOT EDIT!
+
+package {{.GoPackage}}
+
+import (
+	"sync"
+	"golang.org/x/net/context"
+	"github.com/golang/protobuf/proto"
+	"github.com/willtrking/go-proto-collections/runtime"
+)
+
+
+{{ range .CLTypes }}
+
+////////////////////////////////////////////////////////////////////////////////
+///// IMPLEMENT THIS INTERFACE!!
+////////////////////////////////////////////////////////////////////////////////
+
+type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer interface {
+	Validate(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
+	CheckPrecondition(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
+	Write(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}, []runtime.WriterError)
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+///// CALL THIS WITH THE IMPLEMENTATION OF ABOVE INTERFACE!!
+////////////////////////////////////////////////////////////////////////////////
+
+func Register{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer(r *runtime.CollectionRegistry, l {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer) {
+	
+	r.RegisterWriter(&{{.CollectionGoType}}{}, New{{.CollectionGoType}}_Writer(l))
+	
+}
+
+{{ end }}
+
+
+
+
+{{ range .CLTypes }}
+
+type {{.CollectionGoType}}_Writer struct {
+	readLock sync.Mutex
+	validateLock sync.Mutex
+	preconLock sync.Mutex
+	writeLock sync.Mutex
+	readWait sync.Mutex
+	validateWait sync.Mutex
+	preconWait sync.Mutex
+	writeWait sync.Mutex
+	validateWaitUnlockOnce sync.Once
+	preconWaitUnlockOnce sync.Once
+	writeWaitUnlockOnce sync.Once
+	readOnce sync.Once
+	validateHadErrors bool
+	preconHadErrors bool
+	writeHadErrors bool
+	reading  bool
+	didRead   bool
+	Data     []*{{.CollectionDataTypeGoName}}
+	Parent *{{.ParentGoName}}
+	Writer   {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer
+}
+
+func (c *{{.CollectionGoType}}_Writer) Reading() bool { return c.reading }
+func (c *{{.CollectionGoType}}_Writer) DidRead() bool  { return c.didRead }
+
+
+func (c *{{.CollectionGoType}}_Writer) InterfaceSlice() []interface{} {
+
+	dL := len(c.Data)
+
+	if dL > 0 {
+		f := make([]interface{}, dL)
+
+		for i, dI := range c.Data {
+			func(y interface{}) {
+				f[i] = y
+			}(&*dI)
+		}
+
+		return f
+	} else {
+		return nil
+	}
+
+}
+
+func (c *{{.CollectionGoType}}_Writer) ProtoSlice() []proto.Message {
+
+	dL := len(c.Data)
+
+	if dL > 0 {
+		f := make([]proto.Message, dL)
+
+		for i, dI := range c.Data {
+			f[i] = dI
+		}
+
+		return f
+	} else {
+		return nil
+	}
+
+}
+
+
+func (c *{{.CollectionGoType}}_Writer) Read(from []proto.Message, parent proto.Message) {
+	//Need to acquire a lock here so we wait until the first call is done
+	//Provides safety for other functions in the chain
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	reader := func() {
+		c.reading = true
+		defer func() { c.reading = false }()
+		defer func() { c.didRead = true }()
+		defer c.readWait.Unlock()
+
+		c.Data = make([]*{{.CollectionDataTypeGoName}}, len(from))
+		c.Parent = parent.(*{{.ParentGoName}})
+
+		for idx, f := range from {
+			c.Data[idx] = f.(*{{.CollectionDataTypeGoName}})
+		}
+
+	}
+
+	c.readOnce.Do(reader)
+
+}
+
+func (c *{{.CollectionGoType}}_Writer) WaitRead() {
+	c.readWait.Lock()
+	defer c.readWait.Unlock()
+}
+
+func (c *{{.CollectionGoType}}_Writer) Validate(ctx context.Context) (context.Context, []runtime.WriterError) {
+	c.validateLock.Lock()
+	defer c.validateLock.Unlock()
+
+	nCtx, err := c.Writer.Validate(ctx, c.Data, c.Parent)
+
+	if len(err) > 0 {
+		c.validateHadErrors = true
+	} else {
+		c.validateHadErrors = false
+	}
+
+	return nCtx, err
+}
+
+func (c *{{.CollectionGoType}}_Writer) ValidateUnlockWait() {
+	ul := func() {
+		c.validateWait.Unlock()
+	}
+
+	c.validateWaitUnlockOnce.Do(ul)
+}
+
+func (c *{{.CollectionGoType}}_Writer) ValidateHadErrors() bool {
+	return c.validateHadErrors
+}
+
+func (c *{{.CollectionGoType}}_Writer) SetValidateHadErrors(v bool) {
+	c.validateHadErrors = v
+}
+
+func (c *{{.CollectionGoType}}_Writer) WaitValidate() {
+	c.validateWait.Lock()
+	defer c.validateWait.Unlock()
+}
+
+
+func (c *{{.CollectionGoType}}_Writer) CheckPrecondition(ctx context.Context) (context.Context, []runtime.WriterError) {
+	c.preconLock.Lock()
+	defer c.preconLock.Unlock()
+
+	nCtx, err := c.Writer.CheckPrecondition(ctx, c.Data, c.Parent)
+
+	if len(err) > 0 {
+		c.preconHadErrors = true
+	} else {
+		c.preconHadErrors = false
+	}
+
+	return nCtx, err
+}
+
+func (c *{{.CollectionGoType}}_Writer) PreconditionUnlockWait() {
+	ul := func() {
+		c.preconWait.Unlock()
+	}
+
+	c.preconWaitUnlockOnce.Do(ul)
+}
+
+func (c *{{.CollectionGoType}}_Writer) WaitPrecondition() {
+	c.preconWait.Lock()
+	defer c.preconWait.Unlock()
+}
+
+func (c *{{.CollectionGoType}}_Writer) PreconditionHadErrors() bool {
+	return c.preconHadErrors
+}
+
+func (c *{{.CollectionGoType}}_Writer) SetPreconditionHadErrors(v bool) {
+	c.preconHadErrors = v
+}
+
+func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) ([]interface{}, []runtime.WriterError) {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
+	result, err := c.Writer.Write(ctx, c.Data, c.Parent)
+
+	if len(err) > 0 {
+		c.writeHadErrors = true
+		return nil, err
+	} else {
+		c.writeHadErrors = false
+	}
+
+	rL := len(result)
+
+	if rL > 0 {
+		s := make([]interface{},rL)
+		for idx, r := range result {
+			s[idx] = r
+		}
+		return s, err
+
+	} else {
+		return []interface{}{}, err
+	}
+	
+}
+
+func (c *{{.CollectionGoType}}_Writer) WriteUnlockWait() {
+	ul := func() {
+		c.writeWait.Unlock()
+	}
+
+	c.writeWaitUnlockOnce.Do(ul)
+}
+
+func (c *{{.CollectionGoType}}_Writer) WaitWrite() {
+	c.writeWait.Lock()
+	defer c.writeWait.Unlock()
+}
+
+func (c *{{.CollectionGoType}}_Writer) WriteHadErrors() bool {
+	return c.writeHadErrors
+}
+
+func (c *{{.CollectionGoType}}_Writer) SetWriteHadErrors(v bool) {
+	c.writeHadErrors = v
+}
+
+func New{{.CollectionGoType}}_Writer(l {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer) func() (runtime.CollectionWriter,error) {
+
+	return func() (runtime.CollectionWriter,error) {
+		f := &{{.CollectionGoType}}_Writer{
+			readLock: sync.Mutex{},
+			validateLock: sync.Mutex{},
+			preconLock: sync.Mutex{},
+			writeLock: sync.Mutex{},
+			readWait: sync.Mutex{},
+			validateWait: sync.Mutex{},
+			preconWait: sync.Mutex{},
+			writeWait: sync.Mutex{},
+			readOnce:     sync.Once{},
+			validateWaitUnlockOnce:     sync.Once{},
+			preconWaitUnlockOnce:     sync.Once{},
+			writeWaitUnlockOnce:     sync.Once{},
+			validateHadErrors: false,
+			preconHadErrors: false,
+			writeHadErrors: false,
+			reading:  false,
+			didRead:   false,
+			Data:     []*{{.CollectionDataTypeGoName}}{},
+			Writer:   l,
+		}
+
+		f.readWait.Lock()
+		f.validateWait.Lock()
+		f.preconWait.Lock()
+		f.writeWait.Lock()
+
+		return f,nil
+	}
+}
+
+{{ end }}
 `))

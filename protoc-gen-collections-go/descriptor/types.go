@@ -111,6 +111,20 @@ func GetGoBaseType(t *descriptor.FieldDescriptorProto_Type, f *File) string {
 	return ""
 }
 
+func GetGoDefaultValue(t descriptor.FieldDescriptorProto, f *File) string {
+	//TODO: Enum?
+
+	if t.GetDefaultValue() != "" {
+		return t.GetDefaultValue()
+	}
+
+	if f.proto2() {
+		return goProto2DefaultStringValues[*t.Type]
+	} else {
+		return goProto3DefaultStringValues[*t.Type]
+	}
+}
+
 var goProto3BaseType = map[descriptor.FieldDescriptorProto_Type]string{
 	descriptor.FieldDescriptorProto_TYPE_DOUBLE:   "float64",
 	descriptor.FieldDescriptorProto_TYPE_FLOAT:    "float32",
@@ -145,4 +159,42 @@ var goProto2BaseType = map[descriptor.FieldDescriptorProto_Type]string{
 	descriptor.FieldDescriptorProto_TYPE_SFIXED64: "*int64",
 	descriptor.FieldDescriptorProto_TYPE_SINT32:   "*int32",
 	descriptor.FieldDescriptorProto_TYPE_SINT64:   "*int64",
+}
+
+var goProto3DefaultStringValues = map[descriptor.FieldDescriptorProto_Type]string{
+	descriptor.FieldDescriptorProto_TYPE_DOUBLE:   "0",
+	descriptor.FieldDescriptorProto_TYPE_FLOAT:    "0",
+	descriptor.FieldDescriptorProto_TYPE_INT64:    "0",
+	descriptor.FieldDescriptorProto_TYPE_UINT64:   "0",
+	descriptor.FieldDescriptorProto_TYPE_INT32:    "0",
+	descriptor.FieldDescriptorProto_TYPE_UINT32:   "0",
+	descriptor.FieldDescriptorProto_TYPE_FIXED64:  "0",
+	descriptor.FieldDescriptorProto_TYPE_FIXED32:  "0",
+	descriptor.FieldDescriptorProto_TYPE_BOOL:     "false",
+	descriptor.FieldDescriptorProto_TYPE_STRING:   "\"\"",
+	descriptor.FieldDescriptorProto_TYPE_BYTES:    "nil",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED32: "0",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED64: "0",
+	descriptor.FieldDescriptorProto_TYPE_SINT32:   "0",
+	descriptor.FieldDescriptorProto_TYPE_SINT64:   "0",
+	descriptor.FieldDescriptorProto_TYPE_MESSAGE:  "nil",
+}
+
+var goProto2DefaultStringValues = map[descriptor.FieldDescriptorProto_Type]string{
+	descriptor.FieldDescriptorProto_TYPE_DOUBLE:   "0",
+	descriptor.FieldDescriptorProto_TYPE_FLOAT:    "0",
+	descriptor.FieldDescriptorProto_TYPE_INT64:    "0",
+	descriptor.FieldDescriptorProto_TYPE_UINT64:   "0",
+	descriptor.FieldDescriptorProto_TYPE_INT32:    "0",
+	descriptor.FieldDescriptorProto_TYPE_UINT32:   "0",
+	descriptor.FieldDescriptorProto_TYPE_FIXED64:  "0",
+	descriptor.FieldDescriptorProto_TYPE_FIXED32:  "0",
+	descriptor.FieldDescriptorProto_TYPE_BOOL:     "false",
+	descriptor.FieldDescriptorProto_TYPE_STRING:   "\"\"",
+	descriptor.FieldDescriptorProto_TYPE_BYTES:    "nil",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED32: "0",
+	descriptor.FieldDescriptorProto_TYPE_SFIXED64: "0",
+	descriptor.FieldDescriptorProto_TYPE_SINT32:   "0",
+	descriptor.FieldDescriptorProto_TYPE_SINT64:   "0",
+	descriptor.FieldDescriptorProto_TYPE_MESSAGE:  "nil",
 }

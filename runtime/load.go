@@ -4,51 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
-	"unicode"
-	"unicode/utf8"
 
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
 )
-
-const COL_DELIM = "."
-
-var dedupDelim = regexp.MustCompile(fmt.Sprintf("\\%s{2,}", COL_DELIM))
-
-func upperFirst(s string) string {
-	if s == "" {
-		return ""
-	}
-	r, n := utf8.DecodeRuneInString(s)
-	return string(unicode.ToUpper(r)) + s[n:]
-}
-
-func cleanPath(path string) string {
-	//Replace all occurences of 2+ delim's with 1 delim
-	//Trim leading/trailing delim
-	//Makes parsing a little easier
-	path = strings.Trim(path, COL_DELIM)
-	path = dedupDelim.ReplaceAllString(path, COL_DELIM)
-	return path
-}
-
-func closeReadyChannelList(chans []chan string) {
-	for _, c := range chans {
-		if c != nil {
-			close(c)
-		}
-	}
-}
-
-func closeParentPointerChannelList(chans map[string]chan []interface{}) {
-	for _, c := range chans {
-		if c != nil {
-			close(c)
-		}
-	}
-}
 
 func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
 
@@ -176,7 +136,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 						//Gotta wait for parent to be loaded
 						loaderMap[parent].Wait()
 
-						parentData := loaderMap[parent].DataSlice()
+						parentData := loaderMap[parent].InterfaceSlice()
 						//fmt.Println("    ----LOADED PARENT ",parentData)
 
 						if parentData == nil {
@@ -212,7 +172,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 					loaderMap[readyPath].Load(parentKeys)
 
 					//Extract the loaded data
-					loaded := loaderMap[readyPath].DataSlice()
+					loaded := loaderMap[readyPath].InterfaceSlice()
 
 					var pointers []interface{}
 					//If parent is our delim, this is top level, so we need a special extraction
@@ -235,7 +195,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 
 							//Load what we found into our top level protobuf by the collection key we're on
 							topProto.LoadCollection(colKey, found)
-							pointers = append(pointers, topProto.CollectionDataSlice(colKey)...)
+							pointers = append(pointers, topProto.CollectionInterfaceSlice(colKey)...)
 						}
 
 						//Ensure our path is in both the parentPointerChannels AND parentChildCount
@@ -279,7 +239,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 								//fmt.Println(found)
 								asserted.LoadCollection(colKey, found)
 
-								pointers = append(pointers, asserted.CollectionDataSlice(colKey)...)
+								pointers = append(pointers, asserted.CollectionInterfaceSlice(colKey)...)
 
 							}
 							//fmt.Println(" +++++ CLEANED ",colKey,parentPointers)

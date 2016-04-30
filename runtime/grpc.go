@@ -8,7 +8,7 @@ import (
 )
 
 //Extract paths for LoadCollections from GRPC metadata
-func PathsFromMetadata(m metadata.MD) ([]string, error) {
+func PathsFromMetadata(m metadata.MD) []string {
 	var final []string
 	if frm, ok := m["collections"]; ok {
 		for _, c := range frm {
@@ -26,13 +26,13 @@ func PathsFromMetadata(m metadata.MD) ([]string, error) {
 		}
 
 	}
-	return final, nil
+	return final
 }
 
 //Extract paths for LoadCollections from GRPC context
-func PathsFromContext(c context.Context) ([]string, error) {
+func PathsFromContext(c context.Context) []string {
 	if md, ok := metadata.FromContext(c); ok {
 		return PathsFromMetadata(md)
 	}
-	return nil, nil
+	return nil
 }

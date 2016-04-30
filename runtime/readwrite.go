@@ -79,27 +79,16 @@ func linkCollections(elemData []interface{}, details *pgcol.CollectionDetails, c
 	return keysSet, nil
 }
 
-func writerErrorsToMap(err []WriterError, listable bool) map[string][]string {
-	errMap := make(map[string][]string)
-
-	for _, e := range err {
-		errorKey := e.Attr
-		if listable && e.Index != "" {
-			errorKey = errorKey + "[" + e.Index + "]"
-		}
-		errMap[errorKey] = append(errMap[errorKey], e.Desc)
-	}
-
-	return errMap
-}
-
 func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter CollectionWriter,
-	elem pcolh.CollectionElem, parentMessage pcolh.CollectionMessage,
+	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
+	parentMessage pcolh.CollectionMessage,
 	path string, parent string, colKey string,
 	errChan chan map[string][]string,
 	pathLinkingWait *linkingWaitLock, parentLinkingWait *linkingWaitLock,
 	childLinkingLocks []*linkingWaitLock,
 	wg sync.WaitGroup) {
+
+	fmt.Println(" PARENT ----- ", parentElem)
 
 	defer wg.Done()
 	defer close(errChan)
@@ -218,7 +207,12 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		//Internally uses sync.Once to prevent double calls without another Validate call, so it's safe.
 		defer writer.ValidateUnlockWait()
 
+		fmt.Println("------")
+		fmt.Println(linkedAllKeys)
+		fmt.Println(parent)
 		if parent != COL_DELIM && !linkedAllKeys {
+			fmt.Println("TRYING AGAIN!!")
+
 			//Check if any errs could be solved by linking a parent after write/preconditon
 			//If it can, delay the rest until the parent write/precondition, then relink etc
 			//This will cause all children to wait as well
@@ -229,7 +223,7 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 					relink = true
 				}
 			}
-
+			fmt.Println(relink)
 			if relink {
 
 				//Wait for parent precondition
@@ -261,11 +255,16 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 				if linkedAllKeys {
 					//If we did, the precondition validation allowed this
 					//Try to revalidate here
+
+					elem.LoadData(elemData)
+					writer.ReadAgain()
+					writer.Read(elem.ProtoSlice(), parentMessage)
+
 					validateCtx, validateErrs = writer.Validate(ctx)
 
 					if len(validateErrs) > 0 {
 						//Still got a problem
-						errChan <- writerErrorsToMap(validateErrs, details.Listable)
+						errChan <- WriterErrorsToMap(validateErrs, details.Listable)
 						return
 					}
 
@@ -281,6 +280,14 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 						return
 					}
 
+					// In this case we need to change elemData because we modify in a way
+					// we need to do this after write
+					//fmt.Println(parentElem.InterfaceSlice())
+					fmt.Println(parentMessage)
+					fmt.Println("---------------")
+					fmt.Println("")
+					//elemData = parentElem.InterfaceSlice()
+
 					//Relink
 
 					linkedKeys, linkingErrors = linkCollections(elemData, details, colKey, parentMessage)
@@ -288,6 +295,8 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 						errChan <- linkingErrors
 						return
 					}
+
+					fmt.Println(linkedKeys)
 
 					//See if the linked all keys this time
 					linkedAllKeys = false
@@ -298,21 +307,27 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 						}
 					}
 
+					fmt.Println(linkedAllKeys)
+					fmt.Println(details.CollectionKey)
+
 					if linkedAllKeys {
 						//If we did, the write validation allowed this
 						//Try to revalidate here
+						elem.LoadData(elemData)
+						writer.ReadAgain()
+						writer.Read(elem.ProtoSlice(), parentMessage)
 
 						validateCtx, validateErrs = writer.Validate(ctx)
 
 						if len(validateErrs) > 0 {
 							//Still got a problem
-							errChan <- writerErrorsToMap(validateErrs, details.Listable)
+							errChan <- WriterErrorsToMap(validateErrs, details.Listable)
 							return
 						}
 
 					} else {
 						//Otherwise send our validate errors out
-						errChan <- writerErrorsToMap(validateErrs, details.Listable)
+						errChan <- WriterErrorsToMap(validateErrs, details.Listable)
 						return
 					}
 
@@ -320,12 +335,12 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 
 			} else {
 				//Can't relink, just send our validate errors out
-				errChan <- writerErrorsToMap(validateErrs, details.Listable)
+				errChan <- WriterErrorsToMap(validateErrs, details.Listable)
 				return
 			}
 		} else {
 			//Parent top level, or linked all keys
-			errChan <- writerErrorsToMap(validateErrs, details.Listable)
+			errChan <- WriterErrorsToMap(validateErrs, details.Listable)
 			return
 		}
 	}
@@ -375,6 +390,10 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 					return
 				}
 
+				// In this case we need to change elemData because we modify in a way
+				// we need to do this after write
+				//elemData = parentElem.InterfaceSlice()
+
 				//Relink
 
 				linkedKeys, linkingErrors = linkCollections(elemData, details, colKey, parentMessage)
@@ -396,28 +415,32 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 					//If we did, the write validation allowed this
 					//Try to check preconditions here
 
+					elem.LoadData(elemData)
+					writer.ReadAgain()
+					writer.Read(elem.ProtoSlice(), parentMessage)
+
 					preconCtx, preconErrs = writer.CheckPrecondition(ctx)
 
 					if len(preconErrs) > 0 {
 						//Still got a problem
-						errChan <- writerErrorsToMap(preconErrs, details.Listable)
+						errChan <- WriterErrorsToMap(preconErrs, details.Listable)
 						return
 					}
 
 				} else {
 					//Otherwise send our validate errors out
-					errChan <- writerErrorsToMap(preconErrs, details.Listable)
+					errChan <- WriterErrorsToMap(preconErrs, details.Listable)
 					return
 				}
 
 			} else {
 				//Can't relink, just send our precon errors out
-				errChan <- writerErrorsToMap(preconErrs, details.Listable)
+				errChan <- WriterErrorsToMap(preconErrs, details.Listable)
 				return
 			}
 		} else {
 			//Can't relink, just send our precon errors out
-			errChan <- writerErrorsToMap(preconErrs, details.Listable)
+			errChan <- WriterErrorsToMap(preconErrs, details.Listable)
 			return
 		}
 	}
@@ -437,19 +460,21 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 
 	defer writer.WriteUnlockWait()
 
-	writeResult, writeErrs := writer.Write(preconCtx)
+	writeErrs := writer.Write(preconCtx)
 
 	if len(writeErrs) > 0 {
-		errChan <- writerErrorsToMap(writeErrs, details.Listable)
+		errChan <- WriterErrorsToMap(writeErrs, details.Listable)
 		return
 	}
 
-	elem.LoadData(writeResult)
+	elem.LoadData(elemData)
+	parentMessage.LoadCollection(colKey, elem.InterfaceSlice())
 
 }
 
 func buildTree(ctx context.Context, registry *CollectionRegistry, level []pcolh.CollectionMessage,
-	elem pcolh.CollectionElem, parentMessage pcolh.CollectionMessage,
+	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
+	parentMessage pcolh.CollectionMessage,
 	path string, parent string, colKey string,
 	writerMap map[string]CollectionWriter, errChan map[string]chan map[string][]string,
 	linkingWait map[string]*linkingWaitLock, wg sync.WaitGroup) {
@@ -513,9 +538,9 @@ func buildTree(ctx context.Context, registry *CollectionRegistry, level []pcolh.
 				childLinkingLocks = append(childLinkingLocks, linkingWait[currentPath])
 
 				if e.DataIsCollectionMessage() {
-					buildTree(ctx, registry, e.CollectionMessageSlice(), e, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
+					buildTree(ctx, registry, e.CollectionMessageSlice(), e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
 				} else {
-					buildLeaf(ctx, registry, e, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
+					buildLeaf(ctx, registry, e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
 				}
 
 			}
@@ -524,12 +549,14 @@ func buildTree(ctx context.Context, registry *CollectionRegistry, level []pcolh.
 
 	if colKey != "" {
 		wg.Add(1)
-		go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], childLinkingLocks, wg)
+		fmt.Println(level)
+		//go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentElem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], childLinkingLocks, wg)
 	}
 
 }
 
-func buildLeaf(ctx context.Context, registry *CollectionRegistry, elem pcolh.CollectionElem,
+func buildLeaf(ctx context.Context, registry *CollectionRegistry,
+	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
 	parentMessage pcolh.CollectionMessage,
 	path string, parent string, colKey string,
 	writerMap map[string]CollectionWriter,
@@ -569,7 +596,7 @@ func buildLeaf(ctx context.Context, registry *CollectionRegistry, elem pcolh.Col
 	}
 
 	wg.Add(1)
-	go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], []*linkingWaitLock{}, wg)
+	//go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentElem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], []*linkingWaitLock{}, wg)
 
 }
 
@@ -624,7 +651,7 @@ func ReadWriteCollections(ctx context.Context, registry *CollectionRegistry, top
 	linkingWait := make(map[string]*linkingWaitLock)
 	var wg sync.WaitGroup
 
-	buildTree(ctx, registry, topLevel, nil, nil, COL_DELIM, COL_DELIM, "", writerMap, errChan, linkingWait, wg)
+	buildTree(ctx, registry, topLevel, nil, nil, nil, COL_DELIM, COL_DELIM, "", writerMap, errChan, linkingWait, wg)
 
 	wg.Wait()
 

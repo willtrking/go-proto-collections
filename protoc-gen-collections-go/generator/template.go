@@ -138,7 +138,7 @@ func (p *{{.ParentGoName}}) SetCollectionKeyDataFromParent(pb interface{}, colle
 	{{ range .Collections }}
 	case "{{.CollectionName}}":
 		pb.(*{{.CollectionDataTypeGoName}}).{{.CollectionGoKey}} = p.{{.ParentGoKey}}
-		return "{{.CollectionGoKey}}"
+		return "{{.CollectionKey}}"
 	{{ end }}
 	}
 	
@@ -636,6 +636,11 @@ import (
 )
 
 
+type {{.CollectionDataTypeGoName}}_Writer_Response struct {
+	Original *{{.CollectionDataTypeGoName}}
+	New *{{.CollectionDataTypeGoName}}
+}
+
 {{ range .CLTypes }}
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -645,9 +650,8 @@ import (
 type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer interface {
 	Validate(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
 	CheckPrecondition(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
-	Write(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}, []runtime.WriterError)
+	Write(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}_Writer_Response, []runtime.WriterError)
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 ///// CALL THIS WITH THE IMPLEMENTATION OF ABOVE INTERFACE!!
@@ -757,6 +761,13 @@ func (c *{{.CollectionGoType}}_Writer) Read(from []proto.Message, parent proto.M
 
 }
 
+func (c *{{.CollectionGoType}}_Writer) ReadAgain() {
+	newWait := sync.Mutex{}
+	newWait.Lock()
+	c.readOnce = sync.Once{}
+	c.readWait = newWait
+}
+
 func (c *{{.CollectionGoType}}_Writer) WaitRead() {
 	c.readWait.Lock()
 	defer c.readWait.Unlock()
@@ -835,31 +846,24 @@ func (c *{{.CollectionGoType}}_Writer) SetPreconditionHadErrors(v bool) {
 	c.preconHadErrors = v
 }
 
-func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) ([]interface{}, []runtime.WriterError) {
+func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) []runtime.WriterError {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	result, err := c.Writer.Write(ctx, c.Data, c.Parent)
+	response, err := c.Writer.Write(ctx, c.Data, c.Parent)
 
 	if len(err) > 0 {
 		c.writeHadErrors = true
-		return nil, err
+		return err
 	} else {
 		c.writeHadErrors = false
 	}
 
-	rL := len(result)
-
-	if rL > 0 {
-		s := make([]interface{},rL)
-		for idx, r := range result {
-			s[idx] = r
-		}
-		return s, err
-
-	} else {
-		return []interface{}{}, err
+	for _,r := range response {
+		*r.Original = *r.New
 	}
+
+	return nil
 	
 }
 

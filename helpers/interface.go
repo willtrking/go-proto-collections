@@ -46,3 +46,8 @@ type CollectionMessage interface {
 type CollectionGap interface {
 	GapBridge() CollectionMessage
 }
+
+type CollectionWriterData interface {
+	DataMessage() proto.Message
+	ParentMessage() CollectionMessage
+}

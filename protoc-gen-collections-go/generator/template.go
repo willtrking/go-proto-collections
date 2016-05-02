@@ -633,6 +633,7 @@ import (
 	"golang.org/x/net/context"
 	"github.com/golang/protobuf/proto"
 	"github.com/willtrking/go-proto-collections/runtime"
+	"github.com/willtrking/go-proto-collections/helpers"
 )
 
 
@@ -643,14 +644,34 @@ type {{.CollectionDataTypeGoName}}_Writer_Response struct {
 
 {{ range .CLTypes }}
 
+type {{.CollectionDataTypeGoName}}_{{.ParentGoName}} struct {
+	Data *{{.CollectionDataTypeGoName}}
+	Parent *{{.ParentGoName}}
+}
+
+type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Response struct {
+	Original *{{.CollectionDataTypeGoName}}_{{.ParentGoName}}
+	Data *{{.CollectionDataTypeGoName}}
+	Parent *{{.ParentGoName}}
+}
+
+func(cwd *{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) DataMessage() proto.Message{
+	return cwd.Data
+}
+
+func(cwd *{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) ParentMessage() helpers.CollectionMessage{
+	return cwd.Parent
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 ///// IMPLEMENT THIS INTERFACE!!
 ////////////////////////////////////////////////////////////////////////////////
 
 type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer interface {
-	Validate(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
-	CheckPrecondition(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) (context.Context, []runtime.WriterError)
-	Write(context.Context, []*{{.CollectionDataTypeGoName}}, *{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}_Writer_Response, []runtime.WriterError)
+	Validate(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) (context.Context, []runtime.WriterError)
+	CheckPrecondition(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) (context.Context, []runtime.WriterError)
+	Write(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Response, []runtime.WriterError)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -688,8 +709,8 @@ type {{.CollectionGoType}}_Writer struct {
 	writeHadErrors bool
 	reading  bool
 	didRead   bool
-	Data     []*{{.CollectionDataTypeGoName}}
-	Parent *{{.ParentGoName}}
+	Data     []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}
+	WriterResponse []helpers.CollectionWriterData
 	Writer   {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer
 }
 
@@ -707,7 +728,7 @@ func (c *{{.CollectionGoType}}_Writer) InterfaceSlice() []interface{} {
 		for i, dI := range c.Data {
 			func(y interface{}) {
 				f[i] = y
-			}(&*dI)
+			}(&*dI.Data)
 		}
 
 		return f
@@ -725,7 +746,7 @@ func (c *{{.CollectionGoType}}_Writer) ProtoSlice() []proto.Message {
 		f := make([]proto.Message, dL)
 
 		for i, dI := range c.Data {
-			f[i] = dI
+			f[i] = dI.Data
 		}
 
 		return f
@@ -736,28 +757,31 @@ func (c *{{.CollectionGoType}}_Writer) ProtoSlice() []proto.Message {
 }
 
 
-func (c *{{.CollectionGoType}}_Writer) Read(from []proto.Message, parent proto.Message) {
+func (c *{{.CollectionGoType}}_Writer) Read(data []proto.Message, parents []proto.Message) {
 	//Need to acquire a lock here so we wait until the first call is done
 	//Provides safety for other functions in the chain
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 
-	reader := func() {
+	//reader := func() {
 		c.reading = true
 		defer func() { c.reading = false }()
 		defer func() { c.didRead = true }()
-		defer c.readWait.Unlock()
+		//defer c.readWait.Unlock()
 
-		c.Data = make([]*{{.CollectionDataTypeGoName}}, len(from))
-		c.Parent = parent.(*{{.ParentGoName}})
+		c.Data = make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}, len(data))
 
-		for idx, f := range from {
-			c.Data[idx] = f.(*{{.CollectionDataTypeGoName}})
+		for idx, f := range data {
+			c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
+				Data: f.(*{{.CollectionDataTypeGoName}}),
+				Parent: parents[idx].(*{{.ParentGoName}}),
+			}
+
 		}
 
-	}
+	//}
 
-	c.readOnce.Do(reader)
+	//c.readOnce.Do(reader)
 
 }
 
@@ -777,7 +801,7 @@ func (c *{{.CollectionGoType}}_Writer) Validate(ctx context.Context) (context.Co
 	c.validateLock.Lock()
 	defer c.validateLock.Unlock()
 
-	nCtx, err := c.Writer.Validate(ctx, c.Data, c.Parent)
+	nCtx, err := c.Writer.Validate(ctx, c.Data)
 
 	if len(err) > 0 {
 		c.validateHadErrors = true
@@ -814,7 +838,7 @@ func (c *{{.CollectionGoType}}_Writer) CheckPrecondition(ctx context.Context) (c
 	c.preconLock.Lock()
 	defer c.preconLock.Unlock()
 
-	nCtx, err := c.Writer.CheckPrecondition(ctx, c.Data, c.Parent)
+	nCtx, err := c.Writer.CheckPrecondition(ctx, c.Data)
 
 	if len(err) > 0 {
 		c.preconHadErrors = true
@@ -850,7 +874,7 @@ func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) []runtime.Writ
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	response, err := c.Writer.Write(ctx, c.Data, c.Parent)
+	response, err := c.Writer.Write(ctx, c.Data)
 
 	if len(err) > 0 {
 		c.writeHadErrors = true
@@ -859,12 +883,19 @@ func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) []runtime.Writ
 		c.writeHadErrors = false
 	}
 
-	for _,r := range response {
-		*r.Original = *r.New
+	//response := make([]helpers.CollectionWriterData,len(response))
+
+	for _, r := range response {
+		*r.Original.Data = *r.Data
+		*r.Original.Parent = *r.Parent
 	}
 
 	return nil
 	
+}
+
+func (c *{{.CollectionGoType}}_Writer) WriteResponse() []helpers.CollectionWriterData {
+	return c.WriterResponse
 }
 
 func (c *{{.CollectionGoType}}_Writer) WriteUnlockWait() {
@@ -909,7 +940,8 @@ func New{{.CollectionGoType}}_Writer(l {{.CollectionDataTypeGoName}}_{{.ParentGo
 			writeHadErrors: false,
 			reading:  false,
 			didRead:   false,
-			Data:     []*{{.CollectionDataTypeGoName}}{},
+			Data:     []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{},
+			WriterResponse: []helpers.CollectionWriterData{},
 			Writer:   l,
 		}
 

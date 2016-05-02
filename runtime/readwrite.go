@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/golang/protobuf/proto"
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
 	pgcol "github.com/willtrking/go-proto-collections/protocollections"
 )
@@ -23,7 +24,7 @@ type linkingWaitLock struct {
 // Link collections together by validating that the parentKey and the collectionKey are either equal,
 // or can be set to be equal. Short circuit on first problem
 // Has side effects on elemData.
-func linkCollections(elemData []interface{}, details *pgcol.CollectionDetails, colKey string, parentMessage pcolh.CollectionMessage) ([]string, map[string][]string) {
+func linkCollections(elemData []proto.Message, details *pgcol.CollectionDetails, colKey string, parentMessage pcolh.CollectionMessage) ([]string, map[string][]string) {
 	linkingErrors := make(map[string][]string)
 	var keysSet []string
 
@@ -79,16 +80,45 @@ func linkCollections(elemData []interface{}, details *pgcol.CollectionDetails, c
 	return keysSet, nil
 }
 
-func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter CollectionWriter,
-	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
-	parentMessage pcolh.CollectionMessage,
-	path string, parent string, colKey string,
-	errChan chan map[string][]string,
-	pathLinkingWait *linkingWaitLock, parentLinkingWait *linkingWaitLock,
-	childLinkingLocks []*linkingWaitLock,
-	wg sync.WaitGroup) {
+func linkLevel(levelData []*levelHolder, details *pgcol.CollectionDetails) ([]proto.Message, []proto.Message, bool, map[string][]string) {
+	data := []proto.Message{}
+	parents := []proto.Message{}
+	linkedAllKeys := true
 
-	fmt.Println(" PARENT ----- ", parentElem)
+	for _, d := range levelData {
+
+		linkedKeys, linkingErrors := linkCollections(d.levelData, details, d.colKey, d.parent)
+
+		linkedAll := false
+		for _, linked := range linkedKeys {
+			if linked == details.CollectionKey {
+				linkedAll = true
+				break
+			}
+		}
+
+		if !linkedAll {
+			linkedAllKeys = false
+		}
+
+		if linkingErrors != nil {
+
+			return nil, nil, false, linkingErrors
+		}
+
+		for _, l := range d.levelData {
+			data = append(data, l)
+			parents = append(parents, d.parent)
+		}
+	}
+
+	return data, parents, linkedAllKeys, nil
+
+}
+
+func newDataProcessor(ctx context.Context, levelData []*levelHolder, details *pgcol.CollectionDetails,
+	writer CollectionWriter, parentWriter CollectionWriter, errChan chan map[string][]string,
+	pathLinkingWait *linkingWaitLock, parentLinkingWait *linkingWaitLock, wg sync.WaitGroup) {
 
 	defer wg.Done()
 	defer close(errChan)
@@ -98,99 +128,35 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		pathLinkingWait.firstWait.Unlock()
 	}
 
-	secondUnlocker := func() {
-		//Unlock our current path, but only do it once
-		pathLinkingWait.secondWait.Unlock()
-	}
-
-	//Grab parent message (if it isn't top level)
-	//Grab the key for this collection from the parent
-	//Check if all the elements of this collection are OK with that key, meaning
-	// - Is it a default value? If so assume it will be set on write
-	// - If it isnt, make sure it lines up with the key for this collection
-
-	details := elem.DefaultDetails()
-	elemData := elem.InterfaceSlice()
-
-	//Link collection data with parent, short circuit on first error.
-	//See linkCollections definition for more details
-
-	if parent != COL_DELIM {
-		//If the parent ISN'T the top level, we need to wait for it to link
+	if parentWriter != nil {
 		parentLinkingWait.firstWait.Lock()
 		parentLinkingWait.firstWait.Unlock()
 	}
 
-	if writer == nil {
-		err := make(map[string][]string)
-		err[colKey] = []string{
-			"Missing writer",
+	colKey := ""
+
+	for _, lH := range levelData {
+		if colKey == "" {
+			colKey = lH.colKey
+		} else {
+			if colKey != lH.colKey {
+				panic("levelData mismatch colKey")
+			}
 		}
-
-		errChan <- err
-		pathLinkingWait.hadErrors = true
-		pathLinkingWait.secondUnlockOnce.Do(secondUnlocker)
-		pathLinkingWait.firstUnlockOnce.Do(firstUnlocker)
-
-		return
 	}
 
-	if parent != COL_DELIM && parentWriter == nil {
-		err := make(map[string][]string)
-		err[colKey] = []string{
-			"Missing parent writer",
-		}
+	data, parents, linkedAllKeys, linkingErrors := linkLevel(levelData, details)
 
-		errChan <- err
-		pathLinkingWait.hadErrors = true
-		pathLinkingWait.secondUnlockOnce.Do(secondUnlocker)
-		pathLinkingWait.firstUnlockOnce.Do(firstUnlocker)
-
-		return
-	}
-
-	linkedKeys, linkingErrors := linkCollections(elemData, details, colKey, parentMessage)
 	if linkingErrors != nil {
 		errChan <- linkingErrors
-		pathLinkingWait.hadErrors = true
-		pathLinkingWait.secondUnlockOnce.Do(secondUnlocker)
-		pathLinkingWait.firstUnlockOnce.Do(firstUnlocker)
-
 		return
-	}
-
-	writer.Read(elem.ProtoSlice(), parentMessage)
-
-	linkedAllKeys := false
-	for _, l := range linkedKeys {
-		if l == details.CollectionKey {
-			linkedAllKeys = true
-			break
-		}
 	}
 
 	pathLinkingWait.firstUnlockOnce.Do(firstUnlocker)
 
-	if len(childLinkingLocks) > 0 {
-		//Wait for children to link as well
+	writer.Read(data, parents)
 
-		for _, l := range childLinkingLocks {
-			//Wait for child to wait for it's children to link
-			l.secondWait.Lock()
-			l.secondWait.Unlock()
-			if l.hadErrors {
-				pathLinkingWait.hadErrors = true
-				pathLinkingWait.secondUnlockOnce.Do(secondUnlocker)
-				return
-			}
-		}
-
-	}
-
-	pathLinkingWait.hadErrors = false
-	pathLinkingWait.secondUnlockOnce.Do(secondUnlocker)
-
-	if parent != COL_DELIM {
+	if parentWriter != nil {
 		parentWriter.WaitValidate()
 
 		if parentWriter.ValidateHadErrors() {
@@ -207,11 +173,7 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		//Internally uses sync.Once to prevent double calls without another Validate call, so it's safe.
 		defer writer.ValidateUnlockWait()
 
-		fmt.Println("------")
-		fmt.Println(linkedAllKeys)
-		fmt.Println(parent)
-		if parent != COL_DELIM && !linkedAllKeys {
-			fmt.Println("TRYING AGAIN!!")
+		if parentWriter != nil && !linkedAllKeys {
 
 			//Check if any errs could be solved by linking a parent after write/preconditon
 			//If it can, delay the rest until the parent write/precondition, then relink etc
@@ -223,7 +185,7 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 					relink = true
 				}
 			}
-			fmt.Println(relink)
+
 			if relink {
 
 				//Wait for parent precondition
@@ -237,28 +199,18 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 
 				//Relink
 
-				linkedKeys, linkingErrors = linkCollections(elemData, details, colKey, parentMessage)
+				data, parents, linkedAllKeys, linkingErrors = linkLevel(levelData, details)
+
 				if linkingErrors != nil {
 					errChan <- linkingErrors
 					return
-				}
-
-				//See if the linked all keys this time
-				linkedAllKeys = false
-				for _, l := range linkedKeys {
-					if l == details.CollectionKey {
-						linkedAllKeys = true
-						break
-					}
 				}
 
 				if linkedAllKeys {
 					//If we did, the precondition validation allowed this
 					//Try to revalidate here
 
-					elem.LoadData(elemData)
-					writer.ReadAgain()
-					writer.Read(elem.ProtoSlice(), parentMessage)
+					writer.Read(data, parents)
 
 					validateCtx, validateErrs = writer.Validate(ctx)
 
@@ -280,42 +232,17 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 						return
 					}
 
-					// In this case we need to change elemData because we modify in a way
-					// we need to do this after write
-					//fmt.Println(parentElem.InterfaceSlice())
-					fmt.Println(parentMessage)
-					fmt.Println("---------------")
-					fmt.Println("")
-					//elemData = parentElem.InterfaceSlice()
+					data, parents, linkedAllKeys, linkingErrors = linkLevel(levelData, details)
 
-					//Relink
-
-					linkedKeys, linkingErrors = linkCollections(elemData, details, colKey, parentMessage)
 					if linkingErrors != nil {
 						errChan <- linkingErrors
 						return
 					}
 
-					fmt.Println(linkedKeys)
-
-					//See if the linked all keys this time
-					linkedAllKeys = false
-					for _, l := range linkedKeys {
-						if l == details.CollectionKey {
-							linkedAllKeys = true
-							break
-						}
-					}
-
-					fmt.Println(linkedAllKeys)
-					fmt.Println(details.CollectionKey)
-
 					if linkedAllKeys {
 						//If we did, the write validation allowed this
 						//Try to revalidate here
-						elem.LoadData(elemData)
-						writer.ReadAgain()
-						writer.Read(elem.ProtoSlice(), parentMessage)
+						writer.Read(data, parents)
 
 						validateCtx, validateErrs = writer.Validate(ctx)
 
@@ -345,10 +272,9 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		}
 	}
 
-	//Good to go!
 	writer.ValidateUnlockWait()
 
-	if parent != COL_DELIM {
+	if parentWriter != nil {
 		parentWriter.WaitPrecondition()
 
 		if parentWriter.PreconditionHadErrors() {
@@ -365,7 +291,7 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		//Internally uses sync.Once to prevent double calls without another CheckPrecondition call, so it's safe.
 		defer writer.PreconditionUnlockWait()
 
-		if parent != COL_DELIM && !linkedAllKeys {
+		if parentWriter != nil && !linkedAllKeys {
 			//Check if any errs could be solved by linking a parent after write
 			//If it can, delay the rest until the parent write, then relink etc
 			//This will cause all children to wait as well
@@ -390,34 +316,19 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 					return
 				}
 
-				// In this case we need to change elemData because we modify in a way
-				// we need to do this after write
-				//elemData = parentElem.InterfaceSlice()
-
 				//Relink
 
-				linkedKeys, linkingErrors = linkCollections(elemData, details, colKey, parentMessage)
+				data, parents, linkedAllKeys, linkingErrors = linkLevel(levelData, details)
+
 				if linkingErrors != nil {
 					errChan <- linkingErrors
 					return
 				}
 
-				//See if the linked all keys this time
-				linkedAllKeys = false
-				for _, l := range linkedKeys {
-					if l == details.CollectionKey {
-						linkedAllKeys = true
-						break
-					}
-				}
-
 				if linkedAllKeys {
 					//If we did, the write validation allowed this
 					//Try to check preconditions here
-
-					elem.LoadData(elemData)
-					writer.ReadAgain()
-					writer.Read(elem.ProtoSlice(), parentMessage)
+					writer.Read(data, parents)
 
 					preconCtx, preconErrs = writer.CheckPrecondition(ctx)
 
@@ -445,10 +356,9 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 		}
 	}
 
-	//Good to go!
 	writer.PreconditionUnlockWait()
 
-	if parent != COL_DELIM {
+	if parentWriter != nil {
 		parentWriter.WaitWrite()
 
 		if parentWriter.WriteHadErrors() {
@@ -456,26 +366,59 @@ func dataProcessor(ctx context.Context, writer CollectionWriter, parentWriter Co
 			writer.WriteUnlockWait()
 			return
 		}
+
 	}
 
-	defer writer.WriteUnlockWait()
+	//writer.Read()
 
-	writeErrs := writer.Write(preconCtx)
+	writerErrors := writer.Write(preconCtx)
 
-	if len(writeErrs) > 0 {
-		errChan <- WriterErrorsToMap(writeErrs, details.Listable)
+	if len(writerErrors) > 0 {
+		errChan <- WriterErrorsToMap(writerErrors, details.Listable)
 		return
 	}
 
-	elem.LoadData(elemData)
-	parentMessage.LoadCollection(colKey, elem.InterfaceSlice())
+	parentDataMap := make(map[pcolh.CollectionMessage][]interface{})
 
+	for idx, parent := range parents {
+		colMessage := parent.(pcolh.CollectionMessage)
+
+		if _, ok := parentDataMap[colMessage]; !ok {
+			parentDataMap[colMessage] = []interface{}{}
+		}
+
+		parentDataMap[colMessage] = append(parentDataMap[colMessage], data[idx])
+	}
+
+	for parentMessage, data := range parentDataMap {
+		parentMessage.LoadCollection(colKey, data)
+	}
+
+	fmt.Println("++++++++++++")
+	//fmt.Println(data)
+	// /fmt.Println(parents)
+	fmt.Println(parentDataMap)
+	fmt.Println("++++++++++++")
+	/*for _, w := range writerResponse {
+		fmt.Println(w.DataMessage())
+		fmt.Println(w.ParentMessage())
+		fmt.Println("---------")
+		fmt.Println("")
+	}*/
+
+	writer.WriteUnlockWait()
+	fmt.Println(" HEY WERE DONE!")
 }
 
-func buildTree(ctx context.Context, registry *CollectionRegistry, level []pcolh.CollectionMessage,
-	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
-	parentMessage pcolh.CollectionMessage,
-	path string, parent string, colKey string,
+type levelHolder struct {
+	level     []pcolh.CollectionMessage
+	levelData []proto.Message
+	parent    pcolh.CollectionMessage
+	colKey    string
+}
+
+func buildTree(ctx context.Context, registry *CollectionRegistry, level []*levelHolder,
+	path string, parent string, writer CollectionWriter,
 	writerMap map[string]CollectionWriter, errChan map[string]chan map[string][]string,
 	linkingWait map[string]*linkingWaitLock, wg sync.WaitGroup) {
 
@@ -492,111 +435,89 @@ func buildTree(ctx context.Context, registry *CollectionRegistry, level []pcolh.
 		linkingWait[path].secondWait.Lock()
 	}
 
-	if elem != nil {
-		if _, ok := writerMap[path]; !ok {
-			writer, writeErr := registry.Writer(elem)
-
-			if writer != nil && writeErr == nil {
-				//Have a writer
-
-				w, wErr := writer()
-
-				if wErr != nil || w == nil {
-					writerMap[path] = nil
-				} else {
-					writerMap[path] = w
-				}
-
-			}
-		}
-	}
-
 	var childLinkingLocks []*linkingWaitLock
 
-	for _, top := range level {
-		keys := top.CollectionKeys()
-		for _, key := range keys {
-			e := top.CollectionElem(key)
-			if e != nil {
-				currentPath := path + COL_DELIM + key
-				//tree[currentPath] = e
-				errChan[currentPath] = make(chan map[string][]string, 1)
+	nextLevels := make(map[string][]*levelHolder)
+	levelWriters := make(map[string]CollectionWriter)
+	levelDetails := make(map[string]*pgcol.CollectionDetails)
 
-				if _, ok := linkingWait[currentPath]; !ok {
-					//Don't have lock
-					linkingWait[currentPath] = &linkingWaitLock{
-						firstUnlockOnce:  sync.Once{},
-						secondUnlockOnce: sync.Once{},
-						firstWait:        sync.Mutex{},
-						secondWait:       sync.Mutex{},
-						hadErrors:        true,
+	for _, topStuff := range level {
+		for _, top := range topStuff.level {
+			keys := top.CollectionKeys()
+			for _, key := range keys {
+				e := top.CollectionElem(key)
+				if e != nil {
+					currentPath := path + COL_DELIM + key
+					//tree[currentPath] = e
+					errChan[currentPath] = make(chan map[string][]string, 1)
+
+					if _, ok := linkingWait[currentPath]; !ok {
+						//Don't have lock
+						linkingWait[currentPath] = &linkingWaitLock{
+							firstUnlockOnce:  sync.Once{},
+							secondUnlockOnce: sync.Once{},
+							firstWait:        sync.Mutex{},
+							secondWait:       sync.Mutex{},
+							hadErrors:        true,
+						}
+						linkingWait[currentPath].firstWait.Lock()
+						linkingWait[currentPath].secondWait.Lock()
 					}
-					linkingWait[currentPath].firstWait.Lock()
-					linkingWait[currentPath].secondWait.Lock()
+
+					childLinkingLocks = append(childLinkingLocks, linkingWait[currentPath])
+
+					if _, ok := levelWriters[currentPath]; !ok {
+						writer, writeErr := registry.Writer(e)
+						if writer != nil && writeErr == nil {
+							//Have a writer
+
+							w, wErr := writer()
+
+							if wErr != nil || w == nil {
+								levelWriters[currentPath] = nil
+							} else {
+								levelWriters[currentPath] = w
+							}
+
+						} else {
+							panic(writeErr.Error())
+						}
+					}
+
+					if _, ok := nextLevels[currentPath]; !ok {
+						nextLevels[currentPath] = []*levelHolder{}
+					}
+
+					if _, ok := levelDetails[currentPath]; !ok {
+						levelDetails[currentPath] = e.DefaultDetails()
+					}
+
+					nextLevels[currentPath] = append(nextLevels[currentPath], &levelHolder{
+						level:     e.CollectionMessageSlice(),
+						levelData: e.ProtoSlice(),
+						parent:    top,
+						colKey:    key,
+					})
+					if e.DataIsCollectionMessage() {
+						//buildTree(ctx, registry, e.CollectionMessageSlice(), e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
+					} else {
+						//buildLeaf(ctx, registry, e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
+					}
+
 				}
-
-				childLinkingLocks = append(childLinkingLocks, linkingWait[currentPath])
-
-				if e.DataIsCollectionMessage() {
-					buildTree(ctx, registry, e.CollectionMessageSlice(), e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
-				} else {
-					buildLeaf(ctx, registry, e, elem, top, currentPath, path, key, writerMap, errChan, linkingWait, wg)
-				}
-
 			}
 		}
 	}
 
-	if colKey != "" {
+	for levelPath, holder := range nextLevels {
+		fmt.Println(levelPath, " ------ ", holder, " //// ", levelWriters[levelPath])
+		buildTree(ctx, registry, holder, levelPath, path, levelWriters[levelPath], writerMap, errChan, linkingWait, wg)
 		wg.Add(1)
-		fmt.Println(level)
-		//go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentElem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], childLinkingLocks, wg)
+		go newDataProcessor(ctx, holder,
+			levelDetails[levelPath], levelWriters[levelPath],
+			writer, errChan[levelPath],
+			linkingWait[levelPath], linkingWait[path], wg)
 	}
-
-}
-
-func buildLeaf(ctx context.Context, registry *CollectionRegistry,
-	elem pcolh.CollectionElem, parentElem pcolh.CollectionElem,
-	parentMessage pcolh.CollectionMessage,
-	path string, parent string, colKey string,
-	writerMap map[string]CollectionWriter,
-	errChan map[string]chan map[string][]string,
-	linkingWait map[string]*linkingWaitLock, wg sync.WaitGroup) {
-
-	if _, ok := linkingWait[path]; !ok {
-		//Don't have lock
-		linkingWait[path] = &linkingWaitLock{
-			firstUnlockOnce:  sync.Once{},
-			secondUnlockOnce: sync.Once{},
-			firstWait:        sync.Mutex{},
-			secondWait:       sync.Mutex{},
-			hadErrors:        true,
-		}
-		linkingWait[path].firstWait.Lock()
-		linkingWait[path].secondWait.Lock()
-	}
-
-	if elem != nil {
-		if _, ok := writerMap[path]; !ok {
-			writer, writeErr := registry.Writer(elem)
-
-			if writer != nil && writeErr == nil {
-				//Have a writer
-
-				w, wErr := writer()
-
-				if wErr != nil || w == nil {
-					writerMap[path] = nil
-				} else {
-					writerMap[path] = w
-				}
-
-			}
-		}
-	}
-
-	wg.Add(1)
-	//go dataProcessor(ctx, writerMap[path], writerMap[parent], elem, parentElem, parentMessage, path, parent, colKey, errChan[path], linkingWait[path], linkingWait[parent], []*linkingWaitLock{}, wg)
 
 }
 
@@ -646,23 +567,28 @@ func cleanErrMap(path string, errMap map[string][]string) map[string]map[string]
 
 func ReadWriteCollections(ctx context.Context, registry *CollectionRegistry, topLevel []pcolh.CollectionMessage) map[string]map[string][]string {
 
-	writerMap := make(map[string]CollectionWriter)
-	errChan := make(map[string]chan map[string][]string)
-	linkingWait := make(map[string]*linkingWaitLock)
-	var wg sync.WaitGroup
+	if len(topLevel) > 0 {
+		writerMap := make(map[string]CollectionWriter)
+		errChan := make(map[string]chan map[string][]string)
+		linkingWait := make(map[string]*linkingWaitLock)
+		var wg sync.WaitGroup
 
-	buildTree(ctx, registry, topLevel, nil, nil, nil, COL_DELIM, COL_DELIM, "", writerMap, errChan, linkingWait, wg)
+		buildTree(ctx, registry, []*levelHolder{&levelHolder{level: topLevel, parent: nil}}, COL_DELIM, COL_DELIM, nil, writerMap, errChan, linkingWait, wg)
+		fmt.Println("AFTER TREE")
+		wg.Wait()
 
-	wg.Wait()
+		fmt.Println("HERE WE ARE")
+		for path, c := range errChan {
+			fmt.Println("ERRRRRRRRRRRRR ", path)
+			// At this point all the processors are done,
+			// so its safe to just consume from the channels without a select, etc.
+			err := <-c
+			if err != nil && len(err) > 0 {
+				return cleanErrMap(path, err)
+			}
 
-	for path, c := range errChan {
-		// At this point all the processors are done,
-		// so its safe to just consume from the channels without a select, etc.
-		err := <-c
-		if err != nil && len(err) > 0 {
-			return cleanErrMap(path, err)
 		}
-
+		fmt.Println("~~~~~AT THE END~~~~~")
 	}
 
 	return nil

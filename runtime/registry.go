@@ -37,7 +37,7 @@ type CollectionLoader interface {
 type CollectionWriter interface {
 	ReadAgain()
 	//Should use sync.Once internally to prevent double reads
-	Read([]proto.Message, proto.Message)
+	Read([]proto.Message, []proto.Message)
 	//Wait for read to finish
 	WaitRead()
 	//Validate the basic data, ideally with no IO interaction
@@ -56,6 +56,7 @@ type CollectionWriter interface {
 	SetPreconditionHadErrors(bool)
 	//Write our data somewhere, can use IO
 	Write(context.Context) []WriterError
+	WriteResponse() []pcolh.CollectionWriterData
 	//Wait for write
 	WaitWrite()
 	WriteUnlockWait()

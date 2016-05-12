@@ -10,29 +10,33 @@ import (
 //Extract paths for LoadCollections from GRPC metadata
 func PathsFromMetadata(m metadata.MD) []string {
 	var final []string
-	if frm, ok := m["collections"]; ok {
-		for _, c := range frm {
-			c = strings.TrimSpace(c)
+	if m != nil {
+		if frm, ok := m["collections"]; ok {
+			for _, c := range frm {
+				c = strings.TrimSpace(c)
 
-			if len(c) > 0 {
-				split := strings.Split(c, ",")
-				for _, s := range split {
-					s = strings.TrimSpace(s)
-					if len(s) > 0 {
-						final = append(final, s)
+				if c != "" {
+					split := strings.Split(c, ",")
+					for _, s := range split {
+						s = strings.TrimSpace(s)
+						if s != "" {
+							final = append(final, s)
+						}
 					}
 				}
 			}
-		}
 
+		}
 	}
 	return final
 }
 
 //Extract paths for LoadCollections from GRPC context
 func PathsFromContext(c context.Context) []string {
-	if md, ok := metadata.FromContext(c); ok {
-		return PathsFromMetadata(md)
+	if c != nil {
+		if md, ok := metadata.FromContext(c); ok {
+			return PathsFromMetadata(md)
+		}
 	}
 	return nil
 }

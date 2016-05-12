@@ -12,7 +12,7 @@ import (
 
 func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
 
-	if len(topLevel) > 0 {
+	if len(topLevel) > 0 && len(paths) > 0 {
 		//Setup our map to collection loader singletons
 		loaderMap := make(map[string]CollectionLoader)
 

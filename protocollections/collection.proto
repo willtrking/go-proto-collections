@@ -14,7 +14,9 @@ message CollectionDetails {
   bool loaded = 4;
   uint64 maxResults = 5;
   string nextRPC = 6;
-  google.protobuf.Any nextBody = 7;
+  string errorDesc = 7;
+  uint32 errorCode = 8;
+  google.protobuf.Any nextBody = 9;
   
 }
 

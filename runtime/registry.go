@@ -37,6 +37,7 @@ type CollectionLoader interface {
 type CollectionWriter interface {
 	ReadAgain()
 	//Should use sync.Once internally to prevent double reads
+	ReadNew([]*ReadWriteContainer)
 	Read([]proto.Message, []proto.Message)
 	//Wait for read to finish
 	WaitRead()
@@ -56,6 +57,7 @@ type CollectionWriter interface {
 	SetPreconditionHadErrors(bool)
 	//Write our data somewhere, can use IO
 	Write(context.Context) []WriterError
+	WriteNew(context.Context) ([]pcolh.CollectionWriterResponse, []WriterError)
 	WriteResponse() []pcolh.CollectionWriterData
 	//Wait for write
 	WaitWrite()
@@ -93,11 +95,7 @@ func (r *CollectionRegistry) RegisterLoader(m pcolh.CollectionElem, f func(strin
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d := *m.DefaultDetails()
-	k := RegistryKey{
-		d: d,
-		p: proto.MessageName(m.DataProto()),
-	}
+	k := r.Key(m)
 
 	if _, ok := r.Loaders[k]; ok {
 		grpclog.Println("Ignored duplicate collection loader registration of ", k)
@@ -113,11 +111,7 @@ func (r *CollectionRegistry) RegisterWriter(m pcolh.CollectionElem, f func() (Co
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d := *m.DefaultDetails()
-	k := RegistryKey{
-		d: d,
-		p: proto.MessageName(m.DataProto()),
-	}
+	k := r.Key(m)
 
 	if _, ok := r.Writers[k]; ok {
 		grpclog.Println("Ignored duplicate collection writer registration of ", k)
@@ -131,14 +125,16 @@ func (r *CollectionRegistry) RegisterWriter(m pcolh.CollectionElem, f func() (Co
 //Returns a function that will get a zero'd loader with the specified data key
 //Each loader is stateful, so this is important
 func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (func(string) (CollectionLoader, error), error) {
+
+	k := r.Key(m)
+
+	return r.LoaderForKey(k)
+
+}
+
+func (r *CollectionRegistry) LoaderForKey(k RegistryKey) (func(string) (CollectionLoader, error), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	d := *m.DefaultDetails()
-	k := RegistryKey{
-		d: d,
-		p: proto.MessageName(m.DataProto()),
-	}
 
 	if _, ok := r.Loaders[k]; !ok {
 		return nil, errors.New(fmt.Sprintf("No loader for %+v", k))
@@ -151,14 +147,16 @@ func (r *CollectionRegistry) Loader(m pcolh.CollectionElem) (func(string) (Colle
 //Returns a function that will get a zero'd writer with the specified data key
 //Each writer is stateful, so this is important
 func (r *CollectionRegistry) Writer(m pcolh.CollectionElem) (func() (CollectionWriter, error), error) {
+
+	k := r.Key(m)
+
+	return r.WriterForKey(k)
+
+}
+
+func (r *CollectionRegistry) WriterForKey(k RegistryKey) (func() (CollectionWriter, error), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	d := *m.DefaultDetails()
-	k := RegistryKey{
-		d: d,
-		p: proto.MessageName(m.DataProto()),
-	}
 
 	if _, ok := r.Writers[k]; !ok {
 		return nil, errors.New(fmt.Sprintf("No writer for %+v", k))
@@ -166,4 +164,14 @@ func (r *CollectionRegistry) Writer(m pcolh.CollectionElem) (func() (CollectionW
 
 	return r.Writers[k], nil
 
+}
+
+func (r *CollectionRegistry) Key(m pcolh.CollectionElem) RegistryKey {
+
+	d := *m.DefaultDetails()
+
+	return RegistryKey{
+		d: d,
+		p: proto.MessageName(m.DataProto()),
+	}
 }

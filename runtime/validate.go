@@ -7,6 +7,12 @@ import (
 
 //Validation helpers, nothing here is required
 
+func WriterErrorFromError(err error) WriterError {
+	return WriterError{
+		Desc: err.Error(),
+	}
+}
+
 type WriterError struct {
 	Desc  string
 	Attr  string

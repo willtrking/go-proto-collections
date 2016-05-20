@@ -17,7 +17,7 @@ import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"
 import math "math"
 import google_protobuf "github.com/golang/protobuf/ptypes/any"
-import google_protobuf1 "google/protobuf"
+import descriptor "github.com/golang/protobuf/protoc-gen-go/descriptor"
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
@@ -53,7 +53,7 @@ func (m *CollectionDetails) GetNextBody() *google_protobuf.Any {
 }
 
 var E_ParentKey = &proto.ExtensionDesc{
-	ExtendedType:  (*google_protobuf1.MessageOptions)(nil),
+	ExtendedType:  (*descriptor.MessageOptions)(nil),
 	ExtensionType: (*string)(nil),
 	Field:         22915125,
 	Name:          "protocollections.parentKey",
@@ -61,7 +61,7 @@ var E_ParentKey = &proto.ExtensionDesc{
 }
 
 var E_CollectionKey = &proto.ExtensionDesc{
-	ExtendedType:  (*google_protobuf1.MessageOptions)(nil),
+	ExtendedType:  (*descriptor.MessageOptions)(nil),
 	ExtensionType: (*string)(nil),
 	Field:         20912152,
 	Name:          "protocollections.collectionKey",
@@ -69,7 +69,7 @@ var E_CollectionKey = &proto.ExtensionDesc{
 }
 
 var E_MaxResults = &proto.ExtensionDesc{
-	ExtendedType:  (*google_protobuf1.MessageOptions)(nil),
+	ExtendedType:  (*descriptor.MessageOptions)(nil),
 	ExtensionType: (*uint64)(nil),
 	Field:         25251521,
 	Name:          "protocollections.maxResults",
@@ -77,7 +77,7 @@ var E_MaxResults = &proto.ExtensionDesc{
 }
 
 var E_NextRPC = &proto.ExtensionDesc{
-	ExtendedType:  (*google_protobuf1.MessageOptions)(nil),
+	ExtendedType:  (*descriptor.MessageOptions)(nil),
 	ExtensionType: (*string)(nil),
 	Field:         23912128,
 	Name:          "protocollections.nextRPC",
@@ -85,7 +85,7 @@ var E_NextRPC = &proto.ExtensionDesc{
 }
 
 var E_CollectionGap = &proto.ExtensionDesc{
-	ExtendedType:  (*google_protobuf1.MessageOptions)(nil),
+	ExtendedType:  (*descriptor.MessageOptions)(nil),
 	ExtensionType: (*string)(nil),
 	Field:         51216135,
 	Name:          "protocollections.collectionGap",

@@ -131,12 +131,15 @@ type Loader struct {
 }
 
 type LoaderType struct {
-	ParentGoName             string
-	CollectionDataTypeGoName string
-	CollectionGoType         string
-	CollectionKey            string
-	CollectionGoKey          string
-	CollectionKeyGoType      string
+	CollectionDataHasCollections   bool
+	CollectionDataCollectionGoName string
+	ParentGoName                   string
+	CollectionName                 string
+	CollectionDataTypeGoName       string
+	CollectionGoType               string
+	CollectionKey                  string
+	CollectionGoKey                string
+	CollectionKeyGoType            string
 }
 
 type Generator struct {
@@ -144,6 +147,7 @@ type Generator struct {
 	registry                      *descriptor.Registry
 	targetLoaders                 map[string]*Loader
 	implementingCollectionMessage map[string]bool
+	structsWithCollections        map[string]string
 }
 
 func (g *Generator) addLoader(col *CollectionMessage, collectionKeyAttr *pdescriptor.FieldDescriptorProto, collectionKeyMessage *descriptor.Message) {
@@ -160,6 +164,7 @@ func (g *Generator) addLoader(col *CollectionMessage, collectionKeyAttr *pdescri
 
 	l := &LoaderType{
 		ParentGoName:             col.ParentGoName,
+		CollectionName:           col.CollectionName,
 		CollectionDataTypeGoName: col.CollectionDataTypeGoName,
 		CollectionGoType:         col.CollectionGoType,
 		CollectionKey:            col.CollectionKey,
@@ -195,6 +200,7 @@ func (g *Generator) AddGap(file *descriptor.File, gap *descriptor.Message, gapAt
 	}
 
 	g.implementingCollectionMessage[gapMessage.GapGoName] = true
+	//g.structsWithCollections[parentMessage.ParentGoName] = parentMessage.ParentCollectionGoType
 
 	g.Targets[fileName].CollectionGaps = append(g.Targets[fileName].CollectionGaps, gapMessage)
 
@@ -219,6 +225,7 @@ func (g *Generator) AddTarget(file *descriptor.File, parent *descriptor.Message,
 	}
 
 	g.implementingCollectionMessage[parentMessage.ParentGoName] = true
+	g.structsWithCollections[parentMessage.ParentGoName] = parentMessage.ParentCollectionGoType
 
 	//Look for messages nested in our collection type
 	//These form our individual collections
@@ -478,6 +485,15 @@ func (g *Generator) Generate() ([]*plugin.CodeGeneratorResponse_File, error) {
 
 	}
 
+	//Setup collection info
+	for _, loader := range g.targetLoaders {
+		for _, tpe := range loader.CLTypes {
+			if colName, hasCol := g.structsWithCollections[tpe.CollectionDataTypeGoName]; hasCol {
+				tpe.CollectionDataHasCollections = true
+				tpe.CollectionDataCollectionGoName = colName
+			}
+		}
+	}
 	for loaderName, loader := range g.targetLoaders {
 
 		if len(loader.CLTypes) > 0 {
@@ -532,6 +548,7 @@ func NewGenerator(r *descriptor.Registry) *Generator {
 		Targets:                       make(map[string]*GeneratorFile),
 		targetLoaders:                 make(map[string]*Loader),
 		implementingCollectionMessage: make(map[string]bool),
+		structsWithCollections:        make(map[string]string),
 		registry:                      r,
 	}
 }

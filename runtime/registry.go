@@ -35,39 +35,14 @@ type CollectionLoader interface {
 }
 
 type CollectionWriter interface {
-	ReadAgain()
 	//Should use sync.Once internally to prevent double reads
-	ReadNew([]*ReadWriteContainer)
-	Read([]proto.Message, []proto.Message)
-	//Wait for read to finish
-	WaitRead()
+	Read([]*ReadWriteContainer)
 	//Validate the basic data, ideally with no IO interaction
 	Validate(context.Context) (context.Context, []WriterError)
-	//Wait for above validation to complete
-	WaitValidate()
-	ValidateUnlockWait()
-	ValidateHadErrors() bool
-	SetValidateHadErrors(bool)
 	//Validation with IO happens within this function
 	CheckPrecondition(context.Context) (context.Context, []WriterError)
-	//Wait for precondition check
-	WaitPrecondition()
-	PreconditionUnlockWait()
-	PreconditionHadErrors() bool
-	SetPreconditionHadErrors(bool)
 	//Write our data somewhere, can use IO
-	Write(context.Context) []WriterError
-	WriteNew(context.Context) ([]pcolh.CollectionWriterResponse, []WriterError)
-	WriteResponse() []pcolh.CollectionWriterData
-	//Wait for write
-	WaitWrite()
-	WriteUnlockWait()
-	WriteHadErrors() bool
-	SetWriteHadErrors(bool)
-	Reading() bool
-	DidRead() bool
-	InterfaceSlice() []interface{}
-	ProtoSlice() []proto.Message
+	Write(context.Context) ([]pcolh.CollectionWriterResponse, []WriterError)
 }
 
 func NewRegistry() *CollectionRegistry {

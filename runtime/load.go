@@ -7,10 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/net/context"
+
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
 )
 
-func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
+func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
 
 	if len(topLevel) > 0 && len(paths) > 0 {
 		//Setup our map to collection loader singletons
@@ -102,7 +104,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 				loaderGroup.Add(1)
 				readyChannels[pi][si] = make(chan string)
 
-				go func(readyChan chan string, parent string, path string, colKey string) {
+				go func(ctx context.Context, readyChan chan string, parent string, path string, colKey string) {
 					defer loaderGroup.Done()
 
 					readyPath := <-readyChan
@@ -261,7 +263,7 @@ func LoadCollections(r *CollectionRegistry, topLevel []pcolh.CollectionMessage, 
 
 					}
 
-				}(readyChannels[pi][si],
+				}(ctx, readyChannels[pi][si],
 					currentParent.String(),
 					currentPath.String(),
 					split)

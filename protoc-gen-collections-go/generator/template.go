@@ -616,6 +616,8 @@ import (
 	"sync"
 	"errors"
 	"github.com/willtrking/go-proto-collections/runtime"
+
+	"golang.org/x/net/context"
 )
 
 
@@ -626,7 +628,7 @@ import (
 
 type {{.CollectionDataTypeGoName}}Loader interface {
 	{{ range .CLTypes }}
-	From{{.CollectionGoKey}}(string, []{{.CollectionKeyGoType}}, chan []*{{.CollectionDataTypeGoName}})
+	From{{.CollectionGoKey}}(context.Context, string, []{{.CollectionKeyGoType}}, chan []*{{.CollectionDataTypeGoName}})
 	{{ end }}	
 }
 
@@ -700,7 +702,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) InterfaceSlice() []interface{} {
 }
 
 
-func (c *{{.CollectionDataTypeGoName}}_Loader) Load(from []interface{}) {
+func (c *{{.CollectionDataTypeGoName}}_Loader) Load(ctx context.Context, from []interface{}) {
 	//Need to acquire a lock here so we wait until the first call is done
 	//Provides safety for InterfaceSlice()
 	c.loadLock.Lock()
@@ -725,7 +727,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) Load(from []interface{}) {
 			}
 			
 			if a != nil && len(a) > 0 {
-				go c.Loader.From{{.CollectionGoKey}}("{{.CollectionKey}}",a,lc)
+				go c.Loader.From{{.CollectionGoKey}}(ctx, "{{.CollectionKey}}",a,lc)
 				c.Data = <-lc
 			}
 		{{ end }}
@@ -783,15 +785,21 @@ import (
 
 {{ range .CLTypes }}
 
+type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData struct {
+	*{{.CollectionDataTypeGoName}}
+	GPCRWID uint64
+}
+
 {{ if .CollectionDataHasCollections }}	
 type {{.CollectionDataTypeGoName}}_{{.ParentGoName}} struct {
-	Data []*{{.CollectionDataTypeGoName}}
-	Collections []*{{.CollectionDataCollectionGoName}}
+	Data []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData
 	Parent *{{.ParentGoName}}
+	collections map[uint64]*{{.CollectionDataCollectionGoName}}
+
 }
 {{ else }}
 type {{.CollectionDataTypeGoName}}_{{.ParentGoName}} struct {
-	Data []*{{.CollectionDataTypeGoName}}
+	Data []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData
 	Parent *{{.ParentGoName}}
 }
 {{ end }}
@@ -803,7 +811,7 @@ type {{.CollectionDataTypeGoName}}_{{.ParentGoName}} struct {
 type {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer interface {
 	Validate(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) (context.Context, []runtime.WriterError)
 	CheckPrecondition(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) (context.Context, []runtime.WriterError)
-	Write(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}, []runtime.WriterError)
+	Write(context.Context, []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) ([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData, []runtime.WriterError)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -827,7 +835,7 @@ func(cwd *{{.CollectionDataTypeGoName}}_{{.ParentGoName}}) DataProtoSlice() []pr
 	s := make([]proto.Message, len(cwd.Data))
 
 	for idx, d := range cwd.Data {
-		s[idx] = d
+		s[idx] = d.{{.CollectionDataTypeGoName}}
 	}
 
 	return s
@@ -861,156 +869,76 @@ type {{.CollectionGoType}}_Writer struct {
 	validateLock sync.Mutex
 	preconLock sync.Mutex
 	writeLock sync.Mutex
-	readWait sync.Mutex
-	validateWait sync.Mutex
-	preconWait sync.Mutex
-	writeWait sync.Mutex
-	validateWaitUnlockOnce sync.Once
-	preconWaitUnlockOnce sync.Once
-	writeWaitUnlockOnce sync.Once
-	readOnce sync.Once
 	validateHadErrors bool
 	preconHadErrors bool
 	writeHadErrors bool
 	reading  bool
 	didRead   bool
 	Data     []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}
-	WriterResponse []helpers.CollectionWriterData
 	Writer   {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer
 }
 
-func (c *{{.CollectionGoType}}_Writer) Reading() bool { return c.reading }
-func (c *{{.CollectionGoType}}_Writer) DidRead() bool  { return c.didRead }
-
-
-func (c *{{.CollectionGoType}}_Writer) InterfaceSlice() []interface{} {
-
-	/*dL := len(c.Data)
-
-	if dL > 0 {
-		f := make([]interface{}, dL)
-
-		for i, dI := range c.Data {
-			func(y interface{}) {
-				f[i] = y
-			}(&*dI.Data)
-		}
-
-		return f
-	} else {
-		return nil
-	}*/
-
-	return nil
-
-}
-
-func (c *{{.CollectionGoType}}_Writer) ProtoSlice() []proto.Message {
-
-	/*dL := len(c.Data)
-
-	if dL > 0 {
-		f := make([]proto.Message, dL)
-
-		for i, dI := range c.Data {
-			f[i] = dI.Data
-		}
-
-		return f
-	} else {
-		return nil
-	}*/
-
-	return nil
-
-}
-
-
-func (c *{{.CollectionGoType}}_Writer) Read(data []proto.Message, parents []proto.Message) {
-	//Need to acquire a lock here so we wait until the first call is done
-	//Provides safety for other functions in the chain
-	/*c.readLock.Lock()
-	defer c.readLock.Unlock()
-	//reader := func() {
-		c.reading = true
-		defer func() { c.reading = false }()
-		defer func() { c.didRead = true }()
-		//defer c.readWait.Unlock()
-		c.Data = make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}, len(data))
-		for idx, f := range data {
-			c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
-				Data: f.(*{{.CollectionDataTypeGoName}}),
-				Parent: parents[idx].(*{{.ParentGoName}}),
-			}
-		}
-	//}
-	//c.readOnce.Do(reader)*/
-}
-
-func (c *{{.CollectionGoType}}_Writer) ReadNew(data []*runtime.ReadWriteContainer) {
+func (c *{{.CollectionGoType}}_Writer) Read(data []*runtime.ReadWriteContainer) {
 	//Need to acquire a lock here so we wait until the first call is done
 	//Provides safety for other functions in the chain
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 
-	//reader := func() {
-		c.reading = true
-		defer func() { c.reading = false }()
-		defer func() { c.didRead = true }()
-		//defer c.readWait.Unlock()
+	c.reading = true
+	defer func() { c.reading = false }()
+	defer func() { c.didRead = true }()
 
-		c.Data = make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}, len(data))
-		
+	c.Data = make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}, len(data))
+	
+	gpcrwid := 0
 
-		for idx, f := range data {
+	for idx, f := range data {
 
-			{{ if .CollectionDataHasCollections }}
-			c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
-				Data: make([]*{{.CollectionDataTypeGoName}},len(f.Data)),
-				Collections: make([]*{{.CollectionDataCollectionGoName}},len(f.CollectionContainers)),
-				Parent: f.Parent.(*{{.ParentGoName}}),
-			}
-
-			for didx, d := range f.Data {
-				c.Data[idx].Data[didx] = d.(*{{.CollectionDataTypeGoName}})
-				
-				if f.CollectionContainers[didx] == nil {
-					c.Data[idx].Collections[didx] = nil
-				} else {
-					c.Data[idx].Collections[didx] = f.CollectionContainers[didx].(*{{.CollectionDataCollectionGoName}})
-				}
-				
-			}
-			{{ else }}
-			c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
-				Data: make([]*{{.CollectionDataTypeGoName}},len(f.Data)),
-				Parent: f.Parent.(*{{.ParentGoName}}),
-			}
-
-			for didx, d := range f.Data {
-				c.Data[idx].Data[didx] = d.(*{{.CollectionDataTypeGoName}})
-			}
-			{{ end }}
-
+		{{ if .CollectionDataHasCollections }}
+		c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
+			Data: make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData,len(f.Data)),
+			Parent: f.Parent.(*{{.ParentGoName}}),
+			collections: make(map[uint64]*{{.CollectionDataCollectionGoName}},len(f.CollectionContainers)),
 		}
 
-	//}
+		for didx, d := range f.Data {
+			gpcrwid++
 
-	//c.readOnce.Do(reader)
+			c.Data[idx].Data[didx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData{
+				{{.CollectionDataTypeGoName}}: d.(*{{.CollectionDataTypeGoName}}),
+				GPCRWID: uint64(gpcrwid),
+			}
+			
+			if f.CollectionContainers[didx] == nil {
+				c.Data[idx].collections[uint64(gpcrwid)] = nil
+			} else {
+				c.Data[idx].collections[uint64(gpcrwid)] = f.CollectionContainers[didx].(*{{.CollectionDataCollectionGoName}})
+			}
+			
+		}
+		{{ else }}
+		c.Data[idx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{
+			Data: make([]*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData,len(f.Data)),
+			Parent: f.Parent.(*{{.ParentGoName}}),
+		}
+
+		for didx, d := range f.Data {
+			gpcrwid++
+
+			c.Data[idx].Data[didx] = &{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData{
+				{{.CollectionDataTypeGoName}}: d.(*{{.CollectionDataTypeGoName}}),
+				GPCRWID: uint64(gpcrwid),
+			}
+		}
+		{{ end }}
+
+	}
+
+
+
 
 }
 
-func (c *{{.CollectionGoType}}_Writer) ReadAgain() {
-	newWait := sync.Mutex{}
-	newWait.Lock()
-	c.readOnce = sync.Once{}
-	c.readWait = newWait
-}
-
-func (c *{{.CollectionGoType}}_Writer) WaitRead() {
-	c.readWait.Lock()
-	defer c.readWait.Unlock()
-}
 
 func (c *{{.CollectionGoType}}_Writer) Validate(ctx context.Context) (context.Context, []runtime.WriterError) {
 	c.validateLock.Lock()
@@ -1025,27 +953,6 @@ func (c *{{.CollectionGoType}}_Writer) Validate(ctx context.Context) (context.Co
 	}
 
 	return nCtx, err
-}
-
-func (c *{{.CollectionGoType}}_Writer) ValidateUnlockWait() {
-	ul := func() {
-		c.validateWait.Unlock()
-	}
-
-	c.validateWaitUnlockOnce.Do(ul)
-}
-
-func (c *{{.CollectionGoType}}_Writer) ValidateHadErrors() bool {
-	return c.validateHadErrors
-}
-
-func (c *{{.CollectionGoType}}_Writer) SetValidateHadErrors(v bool) {
-	c.validateHadErrors = v
-}
-
-func (c *{{.CollectionGoType}}_Writer) WaitValidate() {
-	c.validateWait.Lock()
-	defer c.validateWait.Unlock()
 }
 
 
@@ -1064,52 +971,7 @@ func (c *{{.CollectionGoType}}_Writer) CheckPrecondition(ctx context.Context) (c
 	return nCtx, err
 }
 
-func (c *{{.CollectionGoType}}_Writer) PreconditionUnlockWait() {
-	ul := func() {
-		c.preconWait.Unlock()
-	}
-
-	c.preconWaitUnlockOnce.Do(ul)
-}
-
-func (c *{{.CollectionGoType}}_Writer) WaitPrecondition() {
-	c.preconWait.Lock()
-	defer c.preconWait.Unlock()
-}
-
-func (c *{{.CollectionGoType}}_Writer) PreconditionHadErrors() bool {
-	return c.preconHadErrors
-}
-
-func (c *{{.CollectionGoType}}_Writer) SetPreconditionHadErrors(v bool) {
-	c.preconHadErrors = v
-}
-
-func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) []runtime.WriterError {
-	/*c.writeLock.Lock()
-	defer c.writeLock.Unlock()
-
-	response, err := c.Writer.Write(ctx, c.Data)
-
-	if len(err) > 0 {
-		c.writeHadErrors = true
-		return err
-	} else {
-		c.writeHadErrors = false
-	}
-
-	//response := make([]helpers.CollectionWriterData,len(response))
-
-	for _, r := range response {
-		*r.Original.Data = *r.Data
-		*r.Original.Parent = *r.Parent
-	}*/
-
-	return nil
-	
-}
-
-func (c *{{.CollectionGoType}}_Writer) WriteNew(ctx context.Context) ([]helpers.CollectionWriterResponse, []runtime.WriterError) {
+func (c *{{.CollectionGoType}}_Writer) Write(ctx context.Context) ([]helpers.CollectionWriterResponse, []runtime.WriterError) {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
@@ -1128,14 +990,24 @@ func (c *{{.CollectionGoType}}_Writer) WriteNew(ctx context.Context) ([]helpers.
 		dat.Parent.ClearCollection(dat.ParentCollection())
 
 		var newCollectionData []interface{}
-		var newData []*{{.CollectionDataTypeGoName}}
+		var newData []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}_WriteData
 
 		for _, r := range response {
-			if dat.Parent.ProtoBelongsToCollection(r, dat.ParentCollection()) {
-				newCollectionData = append(newCollectionData, r)
+			rd := r.{{.CollectionDataTypeGoName}}
+			if dat.Parent.ProtoBelongsToCollection(rd, dat.ParentCollection()) {
+
+				{{ if .CollectionDataHasCollections }}
+				if _, hasCollections := dat.collections[r.GPCRWID]; hasCollections {
+					rd.Collections = dat.collections[r.GPCRWID]
+				}
+				{{ end }}
+
+				
+				newCollectionData = append(newCollectionData, rd)
 				newData = append(newData, r)
 			}
 		}
+
 
 		if len(newCollectionData) > 0 {
 			dat.Parent.LoadCollection(dat.ParentCollection(), newCollectionData)
@@ -1155,31 +1027,6 @@ func (c *{{.CollectionGoType}}_Writer) WriteNew(ctx context.Context) ([]helpers.
 
 }
 
-func (c *{{.CollectionGoType}}_Writer) WriteResponse() []helpers.CollectionWriterData {
-	return c.WriterResponse
-}
-
-func (c *{{.CollectionGoType}}_Writer) WriteUnlockWait() {
-	ul := func() {
-		c.writeWait.Unlock()
-	}
-
-	c.writeWaitUnlockOnce.Do(ul)
-}
-
-func (c *{{.CollectionGoType}}_Writer) WaitWrite() {
-	c.writeWait.Lock()
-	defer c.writeWait.Unlock()
-}
-
-func (c *{{.CollectionGoType}}_Writer) WriteHadErrors() bool {
-	return c.writeHadErrors
-}
-
-func (c *{{.CollectionGoType}}_Writer) SetWriteHadErrors(v bool) {
-	c.writeHadErrors = v
-}
-
 func New{{.CollectionGoType}}_Writer(l {{.CollectionDataTypeGoName}}_{{.ParentGoName}}_Writer) func() (runtime.CollectionWriter,error) {
 
 	return func() (runtime.CollectionWriter,error) {
@@ -1188,28 +1035,14 @@ func New{{.CollectionGoType}}_Writer(l {{.CollectionDataTypeGoName}}_{{.ParentGo
 			validateLock: sync.Mutex{},
 			preconLock: sync.Mutex{},
 			writeLock: sync.Mutex{},
-			readWait: sync.Mutex{},
-			validateWait: sync.Mutex{},
-			preconWait: sync.Mutex{},
-			writeWait: sync.Mutex{},
-			readOnce:     sync.Once{},
-			validateWaitUnlockOnce:     sync.Once{},
-			preconWaitUnlockOnce:     sync.Once{},
-			writeWaitUnlockOnce:     sync.Once{},
 			validateHadErrors: false,
 			preconHadErrors: false,
 			writeHadErrors: false,
 			reading:  false,
 			didRead:   false,
 			Data:     []*{{.CollectionDataTypeGoName}}_{{.ParentGoName}}{},
-			WriterResponse: []helpers.CollectionWriterData{},
 			Writer:   l,
 		}
-
-		f.readWait.Lock()
-		f.validateWait.Lock()
-		f.preconWait.Lock()
-		f.writeWait.Lock()
 
 		return f,nil
 	}

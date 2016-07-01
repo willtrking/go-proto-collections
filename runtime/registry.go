@@ -20,7 +20,7 @@ type CollectionLoader interface {
 	//Return an error if we don't know that key, otherwise nil
 	SetDataKey(string) error
 	//Should use sync.Once internally to prevent double loads
-	Load(from []interface{})
+	Load(context.Context, []interface{})
 	//We want to be able to determine if the loader is loading
 	Loading() bool
 	//We want to be able to determine if the loader is loaded

@@ -172,7 +172,7 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 						}
 
 						//Load from our parent keys, should block
-						loaderMap[readyPath].Load(parentKeys)
+						loaderMap[readyPath].Load(ctx, parentKeys)
 
 						//Extract the loaded data
 						loaded := loaderMap[readyPath].InterfaceSlice()

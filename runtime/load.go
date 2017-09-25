@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
-	"golang.org/x/net/context"
+	"context"
 
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
 )
 
-func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
+func LoadCollections(ctx context.Context, opts CollectionsOpts, r *CollectionRegistry, topLevel []pcolh.CollectionMessage, paths []string) error {
 
 	if len(topLevel) > 0 && len(paths) > 0 {
 		//Setup our map to collection loader singletons
 		loaderMap := make(map[string]CollectionLoader)
+		loaderMapMu := make(map[string]*sync.Mutex)
 
 		//Setup base of our map to our collection elements
 		collectionMap := make(map[string]map[string]pcolh.CollectionElem)
@@ -102,11 +104,13 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 				//This is so we can make non blocking buffered channels of the proper size
 
 				loaderGroup.Add(1)
+
 				readyChannels[pi][si] = make(chan string)
 
-				go func(ctx context.Context, readyChan chan string, parent string, path string, colKey string) {
+				go func(ctx context.Context, opts CollectionsOpts, readyChan chan string, parent string, path string, colKey string) {
 					defer loaderGroup.Done()
 
+					//fmt.Println(path, "START")
 					readyPath := <-readyChan
 
 					if readyPath == "" {
@@ -114,6 +118,8 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 						//Channel was closed or we got an exit signal
 						return
 					}
+
+					//loaderMapMu[readyPath].Lock()
 
 					if !loaderMap[readyPath].Loading() && !loaderMap[readyPath].Loaded() {
 						//Grab parent keys to load from
@@ -168,11 +174,15 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 
 						//If we're skipping, just get out right now
 						if skipLoad {
+							//loaderMapMu[readyPath].Unlock()
 							return
 						}
 
+						//fmt.Println(readyPath, " LOAD")
 						//Load from our parent keys, should block
-						loaderMap[readyPath].Load(ctx, parentKeys)
+						loaderMap[readyPath].Load(ctx, opts, parentKeys)
+						//fmt.Println(readyPath, " LOADED")
+						//loaderMapMu[readyPath].Unlock()
 
 						//Extract the loaded data
 						loaded := loaderMap[readyPath].InterfaceSlice()
@@ -263,7 +273,9 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 
 					}
 
-				}(ctx, readyChannels[pi][si],
+					//fmt.Println(path, "DONE")
+
+				}(ctx, opts, readyChannels[pi][si],
 					currentParent.String(),
 					currentPath.String(),
 					split)
@@ -293,6 +305,8 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 				//Check to see if we've already setup a loader for our current path
 				if _, ok := loaderMap[currentPath.String()]; !ok {
 					//We haven't set it up
+
+					loaderMapMu[currentPath.String()] = &sync.Mutex{}
 
 					//Grab the loader from our registry, if we have it
 					loaderFunc, fErr := r.Loader(collectionElem)
@@ -369,6 +383,7 @@ func LoadCollections(ctx context.Context, r *CollectionRegistry, topLevel []pcol
 		//we avoid keeping un-necessary resources open
 		for li, lps := range loaderPaths {
 			for lii, lp := range lps {
+				time.Sleep(time.Millisecond * 5)
 				readyChannels[li][lii] <- lp
 			}
 		}

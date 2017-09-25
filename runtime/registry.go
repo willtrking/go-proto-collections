@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"golang.org/x/net/context"
+	"context"
 
 	"github.com/golang/protobuf/proto"
 	pcolh "github.com/willtrking/go-proto-collections/helpers"
@@ -20,7 +20,7 @@ type CollectionLoader interface {
 	//Return an error if we don't know that key, otherwise nil
 	SetDataKey(string) error
 	//Should use sync.Once internally to prevent double loads
-	Load(context.Context, []interface{})
+	Load(context.Context, CollectionsOpts, []interface{})
 	//We want to be able to determine if the loader is loading
 	Loading() bool
 	//We want to be able to determine if the loader is loaded

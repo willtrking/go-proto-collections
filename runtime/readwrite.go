@@ -8,7 +8,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/willtrking/go-proto-collections/helpers"
 
-	"golang.org/x/net/context"
+	"context"
 )
 
 type ReadWriteContainer struct {

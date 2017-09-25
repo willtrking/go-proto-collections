@@ -15,6 +15,7 @@ import (
 	pgcol "github.com/willtrking/go-proto-collections/protocollections"
 
 )
+
 `))
 
 var parentMessageTemplate = template.Must(template.New("parentMessage").Parse(`func (p *{{.ParentGoName}}) DefaultCollectionMap() map[string]helpers.CollectionElem {
@@ -539,6 +540,9 @@ var collectionGapTemplate = template.Must(template.New("collectonGap").Parse(`fu
 }
 
 func (g *{{.GapGoName}}) DefaultCollectionMap() map[string]helpers.CollectionElem {
+	var _ pgcol.CollectionDetails
+	var _ fmt.Stringer
+	var _ = errors.New("_easyfixerror")
 	return g.{{.GapGoAttribute}}.DefaultCollectionMap()
 }
 
@@ -617,7 +621,7 @@ import (
 	"errors"
 	"github.com/willtrking/go-proto-collections/runtime"
 
-	"golang.org/x/net/context"
+	"context"
 )
 
 
@@ -628,7 +632,7 @@ import (
 
 type {{.CollectionDataTypeGoName}}Loader interface {
 	{{ range .CLTypes }}
-	From{{.CollectionGoKey}}(context.Context, string, []{{.CollectionKeyGoType}}, chan []*{{.CollectionDataTypeGoName}})
+	From{{.CollectionGoKey}}(context.Context, runtime.CollectionsOpts, string, []{{.CollectionKeyGoType}}, chan []*{{.CollectionDataTypeGoName}})
 	{{ end }}	
 }
 
@@ -702,7 +706,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) InterfaceSlice() []interface{} {
 }
 
 
-func (c *{{.CollectionDataTypeGoName}}_Loader) Load(ctx context.Context, from []interface{}) {
+func (c *{{.CollectionDataTypeGoName}}_Loader) Load(ctx context.Context, opts runtime.CollectionsOpts, from []interface{}) {
 	//Need to acquire a lock here so we wait until the first call is done
 	//Provides safety for InterfaceSlice()
 	c.loadLock.Lock()
@@ -727,7 +731,7 @@ func (c *{{.CollectionDataTypeGoName}}_Loader) Load(ctx context.Context, from []
 			}
 			
 			if a != nil && len(a) > 0 {
-				go c.Loader.From{{.CollectionGoKey}}(ctx, "{{.CollectionKey}}",a,lc)
+				go c.Loader.From{{.CollectionGoKey}}(ctx, opts, "{{.CollectionKey}}",a,lc)
 				c.Data = <-lc
 			}
 		{{ end }}
@@ -775,7 +779,7 @@ package {{.GoPackage}}
 
 import (
 	"sync"
-	"golang.org/x/net/context"
+	"context"
 	"github.com/golang/protobuf/proto"
 	"github.com/willtrking/go-proto-collections/runtime"
 	"github.com/willtrking/go-proto-collections/helpers"

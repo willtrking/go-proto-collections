@@ -3,7 +3,8 @@ package runtime
 import (
 	"strings"
 
-	"golang.org/x/net/context"
+	"context"
+
 	"google.golang.org/grpc/metadata"
 )
 
@@ -34,7 +35,7 @@ func PathsFromMetadata(m metadata.MD) []string {
 //Extract paths for LoadCollections from GRPC context
 func PathsFromContext(c context.Context) []string {
 	if c != nil {
-		if md, ok := metadata.FromContext(c); ok {
+		if md, ok := metadata.FromIncomingContext(c); ok {
 			return PathsFromMetadata(md)
 		}
 	}

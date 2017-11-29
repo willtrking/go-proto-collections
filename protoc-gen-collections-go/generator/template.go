@@ -9,6 +9,7 @@ var fileHeaderTemplate = template.Must(template.New("fileHeader").Parse(`// Code
 package {{.GoPackage}}
 import (
 	"fmt"
+	"sync"
 	"errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/willtrking/go-proto-collections/helpers"
@@ -45,17 +46,49 @@ func (p *{{.ParentGoName}}) CollectionKeys() []string {
 	}
 }
 
+var collectionLoadMU_{{.ParentGoName}} = &sync.Mutex{}
+{{ range .Collections }}
+var collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}} = &sync.Mutex{}
+{{ end }}
+
 func (p *{{.ParentGoName}}) LoadCollection(collection string, data []interface{}) error {
 
+	collectionLoadMU_{{.ParentGoName}}.Lock()
 	if p.{{.ParentGoCollectionAttr}} == nil {
 		p.{{.ParentGoCollectionAttr}} = &{{.ParentCollectionGoType}}{}
 	}
+	collectionLoadMU_{{.ParentGoName}}.Unlock()
 
 	switch collection {
 	{{ range .Collections }}
 	case "{{.CollectionName}}":
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Lock()
 		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} = &{{.CollectionGoType}}{}
 		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.LoadData(data)
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Unlock()
+		return nil	
+	{{ end }}
+	default:
+		return errors.New(fmt.Sprintf("Unknown collection %s", collection))
+	}
+
+}
+
+func (p *{{.ParentGoName}}) LoadCollectionFromProto(collection string, data []proto.Message) error {
+
+	collectionLoadMU_{{.ParentGoName}}.Lock()
+	if p.{{.ParentGoCollectionAttr}} == nil {
+		p.{{.ParentGoCollectionAttr}} = &{{.ParentCollectionGoType}}{}
+	}
+	collectionLoadMU_{{.ParentGoName}}.Unlock()
+
+	switch collection {
+	{{ range .Collections }}
+	case "{{.CollectionName}}":
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Lock()
+		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} = &{{.CollectionGoType}}{}
+		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.LoadDataFromProto(data)
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Unlock()
 		return nil	
 	{{ end }}
 	default:
@@ -66,43 +99,27 @@ func (p *{{.ParentGoName}}) LoadCollection(collection string, data []interface{}
 
 func (p *{{.ParentGoName}}) ClearCollection(collection string) error {
 
+	collectionLoadMU_{{.ParentGoName}}.Lock()
 	if p.{{.ParentGoCollectionAttr}} == nil {
 		p.{{.ParentGoCollectionAttr}} = &{{.ParentCollectionGoType}}{}
 	}
+	collectionLoadMU_{{.ParentGoName}}.Unlock()
 
 	switch collection {
 	{{ range .Collections }}
 	case "{{.CollectionName}}":
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Lock()
 		if p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} != nil {
 			p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.ClearData()
 			p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} = nil
 			p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} = &{{.CollectionGoType}}{}
 		}
+		collectionLoadMU_{{.ParentGoName}}_{{.CollectionName}}.Unlock()
 		return nil	
 	{{ end }}
 	default:
 		return errors.New(fmt.Sprintf("Unknown collection %s", collection))
 	}
-}
-
-
-func (p *{{.ParentGoName}}) LoadCollectionFromProto(collection string, data []proto.Message) error {
-
-	if p.{{.ParentGoCollectionAttr}} == nil {
-		p.{{.ParentGoCollectionAttr}} = &{{.ParentCollectionGoType}}{}
-	}
-
-	switch collection {
-	{{ range .Collections }}
-	case "{{.CollectionName}}":
-		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}} = &{{.CollectionGoType}}{}
-		p.{{.ParentGoCollectionAttr}}.{{.CollectionGoName}}.LoadDataFromProto(data)
-		return nil	
-	{{ end }}
-	default:
-		return errors.New(fmt.Sprintf("Unknown collection %s", collection))
-	}
-
 }
 
 func (p *{{.ParentGoName}}) CollectionInterfaceSlice(collection string) []interface{} {
